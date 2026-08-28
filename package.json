@@ -1,0 +1,55 @@
+{
+  "name": "digen",
+  "version": "0.1.0",
+  "description": "Interactive command-line chat client for the Digen agent API",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "digen": "dist/index.js"
+  },
+  "files": ["dist"],
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch --onSuccess \"node dist/index.js\"",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build",
+    "changeset": "changeset",
+    "release": "changeset publish"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "eventsource-parser": "^3.0.0",
+    "js-yaml": "^4.1.0",
+    "marked": "^13.0.3",
+    "marked-terminal": "^7.1.0",
+    "open": "^10.1.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@changesets/cli": "^2.27.9",
+    "@types/js-yaml": "^4.0.9",
+    "@types/marked-terminal": "^6.1.1",
+    "@types/node": "^22.7.5",
+    "msw": "^2.4.9",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/digen-ai/digen-cli.git"
+  },
+  "keywords": ["digen", "cli", "chat", "agent", "ai"]
+}
