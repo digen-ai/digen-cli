@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DigenClient, PresignResponse } from "../src/lib/client.js";
-import { type AssetLineData, TranscriptStore, isPreviewable } from "../src/ui/transcript.js";
+import { TranscriptStore } from "../src/ui/transcript.js";
 
 function fakeClient(impl: (items: unknown) => Promise<PresignResponse>): DigenClient {
   return { getPresignedUrls: impl } as unknown as DigenClient;
@@ -45,8 +45,6 @@ describe("TranscriptStore asset handling", () => {
     const line = assetLine(store);
     expect(line.data.status).toBe("resolved");
     expect(line.data.url).toBe("https://bucket.s3.example/img_1.jpg");
-    expect(line.data.thumbUrl).toBe("https://bucket.s3.example/img_1_thumb.jpg");
-    expect(isPreviewable(line.data)).toBe(true);
   });
 
   it("falls back to the s3 uri link when presign returns an error", async () => {
@@ -80,7 +78,6 @@ describe("TranscriptStore asset handling", () => {
     const line = assetLine(store);
     expect(line.data.status).toBe("error");
     expect(line.data.url).toBe("s3://bucket/img_1.jpg");
-    expect(isPreviewable(line.data)).toBe(false);
   });
 
   it("does not presign a placeholder asset", async () => {
@@ -124,7 +121,7 @@ describe("TranscriptStore asset handling", () => {
     expect(line.data.url).toBe("s3://bucket/img_1.jpg");
   });
 
-  it("treats video and other non-image types the same way, only differing on preview eligibility", async () => {
+  it("resolves a video (or any other non-image type) to an https link via presign", async () => {
     const client = fakeClient(async () => ({
       results: [
         {
@@ -154,53 +151,6 @@ describe("TranscriptStore asset handling", () => {
     const line = assetLine(store);
     expect(line.data.status).toBe("resolved");
     expect(line.data.url).toBe("https://bucket.s3.example/vid_1.mp4");
-    // No thumbnail_urls in the presign response, so there's nothing to preview.
-    expect(isPreviewable(line.data)).toBe(false);
-  });
-
-  it("previews a video when the presign response includes a thumbnail", async () => {
-    const client = fakeClient(async () => ({
-      results: [
-        {
-          asset_id: "vid_1",
-          urls: { aws: "https://bucket.s3.example/vid_1.mp4" },
-          thumbnail_urls: { aws: "https://bucket.s3.example/vid_1_thumb.jpg" },
-          error: null,
-        },
-      ],
-      expires_at: "2026-02-06T13:00:00Z",
-    }));
-    const store = new TranscriptStore({ client, images: "auto" });
-
-    store.handle({
-      type: "asset",
-      data: {
-        type: "video",
-        asset_id: "vid_1",
-        providers: ["aws"],
-        thumb_providers: ["aws"],
-        uri: "s3://bucket/vid_1.mp4",
-      },
-    });
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-
-    const line = assetLine(store);
-    expect(isPreviewable(line.data)).toBe(true);
-  });
-
-  it("never previews audio or document assets even with a resolved url", async () => {
-    const data: AssetLineData = {
-      assetType: "document",
-      name: "report.pdf",
-      placeholder: false,
-      status: "resolved",
-      url: "https://bucket.s3.example/report.pdf",
-      thumbUrl: "https://bucket.s3.example/report.pdf",
-      providers: ["aws"],
-    };
-    expect(isPreviewable(data)).toBe(false);
   });
 
   it("skips presigning and shows the direct url as-is when the event already carries one", async () => {
@@ -222,7 +172,6 @@ describe("TranscriptStore asset handling", () => {
     const line = assetLine(store);
     expect(line.data.status).toBe("resolved");
     expect(line.data.url).toBe("https://cdn.example/already-resolved.jpg");
-    expect(line.data.thumbUrl).toBe("https://cdn.example/already-resolved.jpg");
   });
 });
 

@@ -1,13 +1,10 @@
-import { MouseProvider } from "@ink-tools/ink-mouse";
 import chalk from "chalk";
 import { Box, Static, Text, useApp, useInput } from "ink";
-import open from "open";
 import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { DigenClient } from "../../lib/client.js";
 import { ApiError } from "../../lib/errors.js";
 import { printApiError, printHelp, printHistory } from "../commandHelpers.js";
-import { type AssetLineData, TranscriptStore } from "../transcript.js";
-import { PreviewPane } from "./PreviewPane.js";
+import { TranscriptStore } from "../transcript.js";
 import { TranscriptLineView } from "./TranscriptLineView.js";
 import { runTurn } from "./runTurn.js";
 
@@ -29,7 +26,6 @@ export function ChatTui({
   const [workflow, setWorkflow] = useState(initialWorkflow);
   const [inputValue, setInputValue] = useState("");
   const [busy, setBusy] = useState(false);
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
 
   const storeRef = useRef<TranscriptStore | null>(null);
   if (!storeRef.current) storeRef.current = new TranscriptStore({ client, images });
@@ -53,15 +49,6 @@ export function ChatTui({
     () => lines.filter((l) => l.turn === currentTurn),
     [lines, currentTurn],
   );
-  const hoveredLine = hoveredId ? liveLines.find((l) => l.id === hoveredId) : undefined;
-
-  const handleHoverAsset = useCallback((line: { id: string } | null) => {
-    setHoveredId(line?.id ?? null);
-  }, []);
-
-  const handleOpenAsset = useCallback((data: AssetLineData) => {
-    if (data.url?.startsWith("http")) void open(data.url).catch(() => {});
-  }, []);
 
   const runSlashCommand = useCallback(
     async (line: string): Promise<"quit" | undefined> => {
@@ -224,37 +211,28 @@ export function ChatTui({
   });
 
   return (
-    <MouseProvider>
+    <Box flexDirection="column">
+      <Text dimColor>
+        Conversation {conversationId} · workflow {workflow}
+      </Text>
+      <Text dimColor>
+        🖼/🎬/🎵/📄 links are clickable in terminals that support it. Type a message and press Enter.
+        /help for commands, Ctrl-C to cancel/quit.
+      </Text>
+      <Static items={frozenLines}>
+        {(line) => <TranscriptLineView key={line.id} line={line} />}
+      </Static>
       <Box flexDirection="column">
-        <Text dimColor>
-          Conversation {conversationId} · workflow {workflow}
-        </Text>
-        <Text dimColor>
-          Hover a 🖼/🎬/🎵/📄 link to preview it, click to open. Type a message and press Enter.
-          /help for commands, Ctrl-C to cancel/quit.
-        </Text>
-        <Static items={frozenLines}>
-          {(line) => <TranscriptLineView key={line.id} line={line} interactive={false} />}
-        </Static>
-        <Box flexDirection="column">
-          {liveLines.map((line) => (
-            <TranscriptLineView
-              key={line.id}
-              line={line}
-              interactive
-              onHoverAsset={handleHoverAsset}
-              onOpenAsset={handleOpenAsset}
-            />
-          ))}
-        </Box>
-        {hoveredLine?.kind === "asset" && <PreviewPane data={hoveredLine.data} />}
-        <Box>
-          <Text color="cyan">{"> "}</Text>
-          <Text>{inputValue}</Text>
-          <Text inverse> </Text>
-          {busy && <Text dimColor> working…</Text>}
-        </Box>
+        {liveLines.map((line) => (
+          <TranscriptLineView key={line.id} line={line} />
+        ))}
       </Box>
-    </MouseProvider>
+      <Box>
+        <Text color="cyan">{"> "}</Text>
+        <Text>{inputValue}</Text>
+        <Text inverse> </Text>
+        {busy && <Text dimColor> working…</Text>}
+      </Box>
+    </Box>
   );
 }

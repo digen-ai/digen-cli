@@ -41,9 +41,9 @@ export function registerChatCommand(program: Command): void {
         return;
       }
 
-      // The TUI needs a real keyboard (stdin) and screen (stdout) to drive
-      // mouse hover/click; anything else (piped output, non-interactive
-      // shells, SSH without a pty) falls back to the plain line-based REPL.
+      // The TUI needs a real keyboard (stdin) and screen (stdout); anything
+      // else (piped output, non-interactive shells, SSH without a pty) falls
+      // back to the plain line-based REPL.
       const interactive = process.stdout.isTTY && process.stdin.isTTY;
       if (interactive) {
         await runChatTui({ client, conversationId, workflow: resolvedWorkflow, images });

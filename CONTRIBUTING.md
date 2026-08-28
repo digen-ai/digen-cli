@@ -44,13 +44,13 @@ src/
     render.ts       Non-TTY fallback: ChatRenderer writes the transcript straight to stdout
     repl.ts         Non-TTY fallback: readline loop, slash commands, driving ChatRenderer
     commandHelpers.ts  Slash-command output shared by repl.ts and ui/tui/
-    tui/            Interactive TTY chat: Ink app, mouse hover/click asset preview
+    tui/            Interactive TTY chat: Ink app; asset links render as clickable OSC 8 hyperlinks
 tests/              vitest unit tests (msw for HTTP mocking)
 ```
 
 `lib/client.ts` is the only place that knows about the Digen gateway API. `ui/transcript.ts` turns
 its SSE events into a plain data model with no rendering logic; both `ui/tui/` (interactive
-terminal, mouse-driven) and `ui/render.ts` (piped/non-interactive fallback) render that model, or in
+terminal) and `ui/render.ts` (piped/non-interactive fallback) render that model, or in
 `render.ts`'s case, drive the same event switch directly since it has no interactivity to support.
 Keeping the API/model/view boundaries clean makes each layer easier to test in isolation.
 

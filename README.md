@@ -58,9 +58,9 @@ Starts a new conversation using your configured default workflow (`skill_agent` 
 `digen config set-workflow`). Type a message and press Enter; responses stream in as they're
 generated, including tool calls, sub-agent activity, and generated assets.
 
-When both stdin and stdout are a real terminal, `digen chat` runs as a mouse-driven TUI. Otherwise
+When both stdin and stdout are a real terminal, `digen chat` runs as an Ink-based TUI. Otherwise
 (piped output, non-interactive shells, SSH without a pty) it falls back to a plain line-based REPL
-with the same slash commands, minus mouse hover.
+with the same slash commands.
 
 Slash commands available inside the chat:
 
@@ -80,17 +80,15 @@ Press `Ctrl-C` while a response is streaming to cancel that task; press it again
 the prompt to exit.
 
 Generated assets (images, videos, audio, documents) are never dumped inline into the conversation —
-only a link is shown, e.g. `🖼 image: cat.jpg`. In the TUI, hover the mouse over that line to pop
-open a preview panel: images (and videos with a thumbnail) show an ANSI-block thumbnail, other
-types show their name/type/link. Click the line to open the asset in your system's default browser
-or app. Hovering only works for the turn that's currently streaming in — once a new message starts,
-older turns scroll into the terminal's own history and are no longer interactive, same as any other
-past terminal output. Over SSH/tmux without mouse reporting (or when piped to a file), the link is
-still printed, you just can't hover it.
+only a link is shown, e.g. `🖼 image: cat.jpg` followed by its URL. In the TUI, that link is a real
+clickable terminal hyperlink (OSC 8) in terminals that support it (iTerm2, Kitty, WezTerm, Windows
+Terminal, VS Code, GNOME Terminal, and others) — click it (usually with Cmd/Ctrl held) to open the
+asset in your system's default browser or app. Terminals without hyperlink support just show the
+plain URL text, which you can select and open manually.
 
 Pass `--no-images` or set `DIGEN_IMAGES=off` to skip resolving assets to a presigned HTTPS link
-entirely — you'll see the raw link the server sent instead, and previews are disabled; this happens
-automatically when output isn't a TTY (e.g. piped to a file).
+entirely — you'll see the raw link the server sent instead; this happens automatically when output
+isn't a TTY (e.g. piped to a file).
 
 ### Resuming a conversation
 

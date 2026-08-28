@@ -1,6 +1,5 @@
-import { useOnClick, useOnMouseEnter, useOnMouseLeave } from "@ink-tools/ink-mouse";
-import { Box, type DOMElement, Text } from "ink";
-import { useRef } from "react";
+import { Box, Text } from "ink";
+import terminalLink from "terminal-link";
 import type { AssetLineData, StatusTone, TranscriptLine } from "../transcript.js";
 import { colorForAgent } from "./colors.js";
 
@@ -19,11 +18,18 @@ function assetLabel(data: AssetLineData): string {
   return `${assetIcon(data.assetType)} ${data.assetType}${data.name ? `: ${data.name}` : ""}`;
 }
 
+/**
+ * The link portion of an asset line. When resolved to an `http(s)` URL, this
+ * wraps it as an OSC 8 terminal hyperlink so a real click (no custom mouse
+ * tracking involved) opens it in the browser; `terminal-link` degrades to
+ * plain text automatically on terminals that don't understand OSC 8.
+ */
 function assetSuffix(data: AssetLineData): string {
   if (data.placeholder) return "(generating…)";
   if (data.status === "pending") return "resolving…";
-  if (data.url) return data.url;
-  return "(link unavailable)";
+  if (!data.url) return "(link unavailable)";
+  if (data.url.startsWith("http")) return terminalLink(data.url, data.url, { fallback: false });
+  return data.url;
 }
 
 const TONE_PROPS: Record<StatusTone, { color?: string; dimColor?: boolean }> = {
@@ -36,27 +42,9 @@ const TONE_PROPS: Record<StatusTone, { color?: string; dimColor?: boolean }> = {
 
 export interface TranscriptLineViewProps {
   line: TranscriptLine;
-  /** Only live (current-turn) lines get mouse hooks — history that's scrolled into the
-   * terminal's own scrollback can no longer be hit-tested against the mouse position. */
-  interactive: boolean;
-  onHoverAsset?: (line: { id: string } | null) => void;
-  onOpenAsset?: (data: AssetLineData) => void;
 }
 
-export function TranscriptLineView({
-  line,
-  interactive,
-  onHoverAsset,
-  onOpenAsset,
-}: TranscriptLineViewProps) {
-  const ref = useRef<DOMElement>(null);
-  const isAsset = line.kind === "asset";
-  const active = interactive && isAsset;
-
-  useOnMouseEnter(ref, active ? () => onHoverAsset?.({ id: line.id }) : null);
-  useOnMouseLeave(ref, active ? () => onHoverAsset?.(null) : null);
-  useOnClick(ref, active && line.kind === "asset" ? () => onOpenAsset?.(line.data) : null);
-
+export function TranscriptLineView({ line }: TranscriptLineViewProps) {
   switch (line.kind) {
     case "user":
       return (
@@ -100,8 +88,8 @@ export function TranscriptLineView({
 
     case "asset":
       return (
-        <Box ref={ref}>
-          <Text color={interactive ? "blueBright" : undefined} dimColor={!interactive}>
+        <Box>
+          <Text dimColor>
             {"  "}
             {assetLabel(line.data)}{" "}
           </Text>

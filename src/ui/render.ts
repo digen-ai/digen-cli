@@ -3,9 +3,9 @@
  *
  * This is the non-interactive fallback used when stdout/stdin aren't a TTY
  * (piped output, `--no-images`/`DIGEN_IMAGES=off`, non-interactive shells):
- * plain sequential writes, no mouse, no inline images — every asset (image
- * included) is just a link. The interactive terminal experience, including
- * hover-to-preview, lives in `ui/tui/` on top of `ui/transcript.ts` instead.
+ * plain sequential writes, no inline images — every asset (image included)
+ * is just a link. The interactive terminal experience lives in `ui/tui/` on
+ * top of `ui/transcript.ts` instead.
  *
  * Assistant text (`chunk`) is written raw as it streams in, since partial
  * markdown can't be safely re-parsed mid-stream; completed messages (e.g.
@@ -69,7 +69,6 @@ export interface ChatRendererOptions {
 interface PendingAssetInfo {
   assetId?: string;
   providers: string[];
-  thumbProviders?: string[];
   /** Already-resolved HTTPS URL, if the event carried one directly (skips presign). */
   directUrl?: string;
   /** s3:// (or other non-fetchable) URI to fall back to when resolution fails. */
@@ -95,11 +94,7 @@ export class ChatRenderer {
       let resolvedUrl = info.directUrl;
       if (!resolvedUrl && this.client && info.assetId && info.providers.length > 0) {
         const presign = await this.client.getPresignedUrls([
-          {
-            asset_id: info.assetId,
-            providers: info.providers,
-            thumbnail_providers: info.thumbProviders,
-          },
+          { asset_id: info.assetId, providers: info.providers },
         ]);
         const result = presign.results[0];
         if (!result || result.error) throw new Error(result?.error ?? "presign failed");
@@ -222,14 +217,13 @@ export class ChatRenderer {
         const fallbackUri = (data.uri as string | undefined) ?? "";
         const assetId = data.asset_id as string | undefined;
         const providers = (data.providers as string[] | undefined) ?? [];
-        const thumbProviders = data.thumb_providers as string[] | undefined;
         const canResolve =
           this.imagesEnabled &&
           Boolean(directUrl || (this.client && assetId && providers.length > 0));
 
         if (canResolve) {
           this.pendingAssets.push(
-            this.prepareAsset({ assetId, providers, thumbProviders, directUrl, fallbackUri }),
+            this.prepareAsset({ assetId, providers, directUrl, fallbackUri }),
           );
         } else if (directUrl || fallbackUri) {
           this.write(chalk.dim(`     ${directUrl || fallbackUri}\n`));

@@ -3,8 +3,8 @@
  * transcript: an ordered list of lines grouped by turn.
  *
  * This is the shared "model" behind both UIs:
- *  - the mouse-driven Ink TUI (`ui/tui/`), which renders lines live and lets
- *    you hover an asset line to preview it;
+ *  - the Ink TUI (`ui/tui/`), which renders lines live and shows resolved
+ *    asset links as native clickable (OSC 8) terminal hyperlinks;
  *  - nothing else needs it — the non-TTY fallback (`ui/render.ts`) keeps
  *    writing straight to stdout, since there's no interactivity to support
  *    there.
@@ -15,7 +15,7 @@
  * instead of writing bytes to a stream that could get interleaved.
  */
 
-import { isInlineImage, pickUrl } from "../lib/assets.js";
+import { pickUrl } from "../lib/assets.js";
 import type { DigenClient } from "../lib/client.js";
 import type { ChatEvent } from "../lib/sse.js";
 
@@ -35,11 +35,8 @@ export interface AssetLineData {
   status: AssetStatus;
   /** Link to show/open once resolved (may still be a non-fetchable `s3://` uri). */
   url?: string;
-  /** Best URL to download bytes from for a hover preview (image, or video with a thumbnail). */
-  thumbUrl?: string;
   assetId?: string;
   providers: string[];
-  thumbProviders?: string[];
 }
 
 export type StatusTone = "info" | "success" | "error" | "warn" | "dim";
@@ -78,12 +75,6 @@ function suggestionLabel(item: unknown): string | null {
   return null;
 }
 
-/** Assets whose thumbnail is worth fetching for a hover preview. */
-export function isPreviewable(data: AssetLineData): boolean {
-  if (data.status !== "resolved" || !data.thumbUrl) return false;
-  return isInlineImage(data.assetType) || data.assetType === "video";
-}
-
 export interface TranscriptOptions {
   /** Client used to resolve `asset_id` -> presigned URL. Omit to disable resolution entirely. */
   client?: DigenClient;
@@ -92,10 +83,8 @@ export interface TranscriptOptions {
 }
 
 interface PendingAssetInfo {
-  assetType: string;
   assetId?: string;
   providers: string[];
-  thumbProviders?: string[];
   directUrl?: string;
   fallbackUri: string;
 }
@@ -244,7 +233,6 @@ export class TranscriptStore {
         const fallbackUri = (data.uri as string | undefined) ?? "";
         const assetId = data.asset_id as string | undefined;
         const providers = (data.providers as string[] | undefined) ?? [];
-        const thumbProviders = data.thumb_providers as string[] | undefined;
 
         const line = this.pushLine({
           kind: "asset",
@@ -255,18 +243,10 @@ export class TranscriptStore {
             status: "pending",
             url: directUrl,
             providers,
-            thumbProviders,
           },
         });
 
-        void this.resolveAsset(line.id, {
-          assetType,
-          assetId,
-          providers,
-          thumbProviders,
-          directUrl,
-          fallbackUri,
-        });
+        void this.resolveAsset(line.id, { assetId, providers, directUrl, fallbackUri });
         return { kind: "continue" };
       }
 
@@ -336,36 +316,21 @@ export class TranscriptStore {
       return;
     }
 
-    // A direct image url doubles as its own thumbnail; other types only get a
-    // thumbnail if the event explicitly says so (never fetch a whole video as
-    // if it were a small preview image).
-    const isImage = isInlineImage(info.assetType);
-
     if (info.directUrl) {
-      this.finishAsset(lineId, {
-        status: "resolved",
-        url: info.directUrl,
-        thumbUrl: isImage ? info.directUrl : undefined,
-      });
+      this.finishAsset(lineId, { status: "resolved", url: info.directUrl });
       return;
     }
 
     if (this.client && info.assetId && info.providers.length > 0) {
       try {
         const presign = await this.client.getPresignedUrls([
-          {
-            asset_id: info.assetId,
-            providers: info.providers,
-            thumbnail_providers: info.thumbProviders,
-          },
+          { asset_id: info.assetId, providers: info.providers },
         ]);
         const result = presign.results[0];
         if (!result || result.error) throw new Error(result?.error ?? "presign failed");
         const url = pickUrl(result.urls, info.providers);
         if (!url) throw new Error("no url available");
-        const explicitThumb = pickUrl(result.thumbnail_urls, info.thumbProviders);
-        const thumbUrl = explicitThumb ?? (isImage ? url : undefined);
-        this.finishAsset(lineId, { status: "resolved", url, thumbUrl });
+        this.finishAsset(lineId, { status: "resolved", url });
       } catch {
         const url = info.fallbackUri || undefined;
         this.finishAsset(lineId, { status: "error", url });
