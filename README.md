@@ -113,14 +113,63 @@ sent and the staged images are kept so you can retry.
 digen chat --conversation conv_abc123
 ```
 
-## Use with Codex (MCP)
+## Use with MCP clients
 
-`digen` also ships an MCP server, `digen-mcp`, so agents like [Codex CLI](https://developers.openai.com/codex)
-can call Digen automatically instead of you driving the chat by hand.
+`digen` also ships an MCP server, `digen-mcp`, so agents like [Claude Code](https://code.claude.com),
+[Cursor](https://cursor.com/docs/mcp), and [Codex CLI](https://developers.openai.com/codex) can call
+Digen automatically instead of you driving the chat by hand.
 
 ```bash
 npm install -g digen
 digen login
+```
+
+`digen-mcp` reuses the credentials saved by `digen login` (`~/.digen/cli.yaml`) — no token is passed
+through the MCP configuration. If a GUI client can't find `digen-mcp`, it likely isn't on that app's
+`PATH`; use the output of `which digen-mcp`, or run it via npx:
+
+```json
+{ "command": "npx", "args": ["-y", "-p", "digen", "digen-mcp"] }
+```
+
+### Claude Code
+
+```bash
+claude mcp add --transport stdio --scope user digen -- digen-mcp
+```
+
+Or add the following to `~/.claude.json` (user scope) or `.mcp.json` at the project root (shared
+with the team):
+
+```json
+{
+  "mcpServers": {
+    "digen": {
+      "type": "stdio",
+      "command": "digen-mcp"
+    }
+  }
+}
+```
+
+### Cursor
+
+Add the server from **Cursor Settings → MCP**, or write `~/.cursor/mcp.json` (all projects) /
+`.cursor/mcp.json` (this project):
+
+```json
+{
+  "mcpServers": {
+    "digen": {
+      "command": "digen-mcp"
+    }
+  }
+}
+```
+
+### Codex
+
+```bash
 codex mcp add digen -- digen-mcp
 ```
 
@@ -132,10 +181,78 @@ command = "digen-mcp"
 tool_timeout_sec = 60
 ```
 
-`digen-mcp` reuses the credentials saved by `digen login` (`~/.digen/cli.yaml`) — no token is passed
-through the Codex configuration. Because Digen workflows can take anywhere from a few seconds to
-several minutes (e.g. generating a video or image), chatting is split into two tools instead of one
-blocking call:
+### Claude Desktop
+
+Edit `claude_desktop_config.json`, then fully restart Claude Desktop:
+
+| OS | Path |
+| --- | --- |
+| macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
+| Linux | `~/.config/Claude/claude_desktop_config.json` |
+
+```json
+{
+  "mcpServers": {
+    "digen": {
+      "command": "digen-mcp"
+    }
+  }
+}
+```
+
+### VS Code (GitHub Copilot)
+
+Create `.vscode/mcp.json` in the workspace, or run **MCP: Open User Configuration**. The root key is
+`servers`, not `mcpServers`:
+
+```json
+{
+  "servers": {
+    "digen": {
+      "type": "stdio",
+      "command": "digen-mcp"
+    }
+  }
+}
+```
+
+### Gemini CLI
+
+```bash
+gemini mcp add -s user digen digen-mcp
+```
+
+Or add to `~/.gemini/settings.json` (user) / `.gemini/settings.json` (project):
+
+```json
+{
+  "mcpServers": {
+    "digen": {
+      "command": "digen-mcp"
+    }
+  }
+}
+```
+
+### Windsurf
+
+Write `~/.codeium/windsurf/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "digen": {
+      "command": "digen-mcp"
+    }
+  }
+}
+```
+
+### Tools
+
+Because Digen workflows can take anywhere from a few seconds to several minutes (e.g. generating a
+video or image), chatting is split into two tools instead of one blocking call:
 
 | Tool | Purpose |
 | --- | --- |
@@ -146,8 +263,8 @@ blocking call:
 | `digen_list_workflows` | List available workflows |
 | `digen_history` | Fetch a conversation's message history |
 
-Codex (or any other MCP client) discovers these tools automatically and calls them as needed —
-no shell wrapping or manual invocation required.
+The MCP client discovers these tools automatically and calls them as needed — no shell wrapping or
+manual invocation required.
 
 ## How it works
 
