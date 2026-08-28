@@ -207,3 +207,60 @@ describe("ChatRenderer asset handling", () => {
     expect(out.text()).toContain("https://bucket.s3.example/vid_1.mp4");
   });
 });
+
+describe("ChatRenderer guidance", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("prints text from object-form suggested_questions", () => {
+    const renderer = new ChatRenderer({ images: "off" });
+    const out = captureOutput();
+
+    renderer.handle({
+      type: "guidance",
+      data: {
+        suggested_questions: [
+          { text: "开始设计角色/场景视觉" },
+          { text: "再调整一下这场戏", action: { type: "send_message" } },
+        ],
+      },
+    });
+
+    const text = out.text();
+    expect(text).toContain("Suggested follow-ups:");
+    expect(text).toContain("开始设计角色/场景视觉");
+    expect(text).toContain("再调整一下这场戏");
+    expect(text).not.toContain("[object Object]");
+  });
+
+  it("prints legacy string suggested_questions", () => {
+    const renderer = new ChatRenderer({ images: "off" });
+    const out = captureOutput();
+
+    renderer.handle({
+      type: "guidance",
+      data: { suggested_questions: ["可以修改角色设定吗？", "如何调整剧本风格？"] },
+    });
+
+    const text = out.text();
+    expect(text).toContain("可以修改角色设定吗？");
+    expect(text).toContain("如何调整剧本风格？");
+  });
+
+  it("skips items without a usable label", () => {
+    const renderer = new ChatRenderer({ images: "off" });
+    const out = captureOutput();
+
+    renderer.handle({
+      type: "guidance",
+      data: {
+        suggested_questions: [{ text: "keep me" }, { action: { type: "fill_input" } }, "", "  "],
+      },
+    });
+
+    const text = out.text();
+    expect(text).toContain("keep me");
+    expect(text).not.toContain("[object Object]");
+  });
+});

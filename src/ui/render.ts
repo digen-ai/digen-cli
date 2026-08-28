@@ -35,6 +35,19 @@ function colorForAgent(agent: string): (text: string) => string {
   return color;
 }
 
+/** `guidance.suggested_questions` items are strings (legacy) or `{ text }` objects. */
+function suggestionLabel(item: unknown): string | null {
+  if (typeof item === "string") {
+    const text = item.trim();
+    return text || null;
+  }
+  if (item && typeof item === "object" && "text" in item) {
+    const text = String((item as { text?: unknown }).text ?? "").trim();
+    return text || null;
+  }
+  return null;
+}
+
 export type TurnOutcome =
   | { kind: "continue" }
   | { kind: "done" }
@@ -263,7 +276,10 @@ export class ChatRenderer {
 
       case "guidance": {
         this.ensureNewline();
-        const suggestions = (event.data?.suggested_questions as string[] | undefined) ?? [];
+        const raw = event.data?.suggested_questions;
+        const suggestions = Array.isArray(raw)
+          ? raw.map(suggestionLabel).filter((s): s is string => s !== null)
+          : [];
         if (suggestions.length > 0) {
           this.write(chalk.dim("\nSuggested follow-ups:\n"));
           for (const s of suggestions) this.write(chalk.dim(`  • ${s}\n`));
