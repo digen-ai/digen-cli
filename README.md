@@ -8,6 +8,9 @@ An interactive command-line chat client for the [Digen](https://digen.ai) agent 
 then chat with Digen's agents straight from your terminal — streaming responses, tool calls, and
 generated assets included.
 
+Published on npm as [`digen-cli`](https://www.npmjs.com/package/digen-cli) (`npm install -g digen-cli`).
+The commands are still `digen` and `digen-mcp`.
+
 ## Quick start
 
 ```bash
