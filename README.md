@@ -1,7 +1,7 @@
 # digen
 
 [![CI](https://github.com/digen-ai/digen-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/digen-ai/digen-cli/actions/workflows/ci.yml)
-[![npm version](https://img.shields.io/npm/v/digen.svg)](https://www.npmjs.com/package/digen)
+[![npm version](https://img.shields.io/npm/v/digen-cli.svg)](https://www.npmjs.com/package/digen-cli)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 
 An interactive command-line chat client for the [Digen](https://digen.ai) agent API. Log in once,
@@ -11,14 +11,14 @@ generated assets included.
 ## Quick start
 
 ```bash
-npx digen login
-npx digen chat
+npx digen-cli login
+npx digen-cli chat
 ```
 
 Or install it globally:
 
 ```bash
-npm install -g digen
+npm install -g digen-cli
 digen login
 digen chat
 ```
@@ -120,7 +120,7 @@ digen chat --conversation conv_abc123
 Digen automatically instead of you driving the chat by hand.
 
 ```bash
-npm install -g digen
+npm install -g digen-cli
 digen login
 ```
 
@@ -129,7 +129,7 @@ through the MCP configuration. If a GUI client can't find `digen-mcp`, it likely
 `PATH`; use the output of `which digen-mcp`, or run it via npx:
 
 ```json
-{ "command": "npx", "args": ["-y", "-p", "digen", "digen-mcp"] }
+{ "command": "npx", "args": ["-y", "-p", "digen-cli", "digen-mcp"] }
 ```
 
 ### Claude Code
