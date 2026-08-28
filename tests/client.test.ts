@@ -148,6 +148,104 @@ describe("DigenClient", () => {
     expect(res.results[1]?.error).toBe("Access denied to asset: img_2");
   });
 
+  it("presigns an upload with the conversation_id query param and filename/content_type body", async () => {
+    server.use(
+      http.post(`${BASE_URL}${GATEWAY_PREFIX}/api/v1/upload/presign`, async ({ request }) => {
+        const url = new URL(request.url);
+        expect(url.searchParams.get("conversation_id")).toBe("conv_1");
+        const body = await request.json();
+        expect(body).toEqual({ filename: "cat.jpg", content_type: "image/jpeg" });
+        return HttpResponse.json({
+          upload_url: "https://s3.example.test/upload-target",
+          final_url: "https://bucket.s3.example.test/uploads/cat.jpg",
+          key: "1/uploads/2026-01-01/cat.jpg",
+          max_size: 10485760,
+        });
+      }),
+    );
+    const client = makeClient();
+    const res = await client.presignUpload("conv_1", {
+      filename: "cat.jpg",
+      contentType: "image/jpeg",
+    });
+    expect(res.upload_url).toBe("https://s3.example.test/upload-target");
+    expect(res.max_size).toBe(10485760);
+  });
+
+  it("registers an uploaded asset via the gateway", async () => {
+    server.use(
+      http.post(
+        `${BASE_URL}${GATEWAY_PREFIX}/api/v1/conversations/conv_1/assets/upload`,
+        async ({ request }) => {
+          const body = await request.json();
+          expect(body).toEqual({
+            url: "https://bucket.s3.example.test/uploads/cat.jpg",
+            asset_type: "image",
+            content_type: "image/jpeg",
+            filename: "cat.jpg",
+          });
+          return HttpResponse.json({
+            asset_id: "upl_abc123",
+            uri: "s3://bucket/uploads/cat.jpg",
+            type: "image",
+            source: "user_upload",
+            providers: ["aws"],
+            parsing_status: null,
+          });
+        },
+      ),
+    );
+    const client = makeClient();
+    const asset = await client.registerUploadedAsset("conv_1", {
+      url: "https://bucket.s3.example.test/uploads/cat.jpg",
+      assetType: "image",
+      contentType: "image/jpeg",
+      filename: "cat.jpg",
+    });
+    expect(asset.asset_id).toBe("upl_abc123");
+    expect(asset.providers).toEqual(["aws"]);
+  });
+
+  it("PUTs to the presigned S3 URL with only Content-Type and x-amz-acl, no gateway headers", async () => {
+    let seenHeaders: Headers | undefined;
+    let seenMethod: string | undefined;
+    server.use(
+      http.put("https://s3.example.test/upload-target", async ({ request }) => {
+        seenHeaders = request.headers;
+        seenMethod = request.method;
+        return new HttpResponse(null, { status: 200 });
+      }),
+    );
+    const client = makeClient();
+    await client.uploadToPresignedUrl(
+      "https://s3.example.test/upload-target",
+      Buffer.from([1, 2, 3]),
+      "image/jpeg",
+    );
+    expect(seenMethod).toBe("PUT");
+    expect(seenHeaders?.get("content-type")).toBe("image/jpeg");
+    expect(seenHeaders?.get("x-amz-acl")).toBe("public-read");
+    expect(seenHeaders?.get("digen-token")).toBeNull();
+    expect(seenHeaders?.get("digen-sessionid")).toBeNull();
+  });
+
+  it("throws an ApiError when the S3 PUT is rejected", async () => {
+    server.use(
+      http.put(
+        "https://s3.example.test/upload-target",
+        () => new HttpResponse(null, { status: 403 }),
+      ),
+    );
+    const client = makeClient();
+    await expect(
+      client.uploadToPresignedUrl(
+        "https://s3.example.test/upload-target",
+        Buffer.from([1]),
+        "image/jpeg",
+      ),
+    ).rejects.toMatchObject({ statusCode: 403 });
+  });
+
   it("raises a plain ApiError for a 404 with a FastAPI-style detail body", async () => {
     server.use(
       http.get(`${BASE_URL}${GATEWAY_PREFIX}/api/v1/conversations/missing`, () =>

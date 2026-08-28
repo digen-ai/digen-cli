@@ -7,9 +7,10 @@
 
 import { createInterface } from "node:readline/promises";
 import chalk from "chalk";
-import type { DigenClient } from "../lib/client.js";
+import type { ChatBlock, DigenClient } from "../lib/client.js";
 import { ApiError } from "../lib/errors.js";
 import type { ChatEvent } from "../lib/sse.js";
+import { type StagedImage, buildMessageBlocks, formatBytes, stageImage } from "../lib/uploads.js";
 import { printApiError, printHelp, printHistory } from "./commandHelpers.js";
 import { ChatRenderer, type TurnOutcome } from "./render.js";
 
@@ -30,6 +31,7 @@ export async function runChatRepl(opts: ReplOptions): Promise<void> {
   const renderer = new ChatRenderer({ client, images: opts.images ?? "auto" });
   let activeController: AbortController | null = null;
   let activeTaskId: string | null = null;
+  let staged: StagedImage[] = [];
 
   const onSigint = () => {
     if (activeController) {
@@ -63,7 +65,7 @@ export async function runChatRepl(opts: ReplOptions): Promise<void> {
       } catch {
         break; // stdin closed (Ctrl-D)
       }
-      if (!line) continue;
+      if (!line && staged.length === 0) continue;
 
       if (line.startsWith("/")) {
         const [cmd, ...rest] = line.slice(1).split(/\s+/);
@@ -136,6 +138,50 @@ export async function runChatRepl(opts: ReplOptions): Promise<void> {
             }
             continue;
           }
+          case "attach": {
+            if (!arg) {
+              console.log(chalk.yellow("Usage: /attach <path-to-image>"));
+              continue;
+            }
+            try {
+              const image = stageImage(arg);
+              staged.push(image);
+              console.log(
+                chalk.green(
+                  `✔ Attached ${image.name} (${formatBytes(image.size)}) — ${staged.length} image${staged.length === 1 ? "" : "s"} staged`,
+                ),
+              );
+            } catch (err) {
+              console.log(chalk.red(err instanceof Error ? err.message : String(err)));
+            }
+            continue;
+          }
+          case "attachments": {
+            if (staged.length === 0) {
+              console.log(chalk.dim("No images staged"));
+            } else {
+              staged.forEach((image, i) => {
+                console.log(`  ${i + 1}. ${image.name} (${formatBytes(image.size)})`);
+              });
+            }
+            continue;
+          }
+          case "detach": {
+            if (!arg || arg === "all") {
+              const count = staged.length;
+              staged = [];
+              console.log(chalk.green(`✔ Detached ${count} image${count === 1 ? "" : "s"}`));
+            } else {
+              const index = Number.parseInt(arg, 10);
+              if (!Number.isInteger(index) || index < 1 || index > staged.length) {
+                console.log(chalk.yellow(`Usage: /detach [n|all] (1-${staged.length || 0})`));
+              } else {
+                const [removed] = staged.splice(index - 1, 1);
+                console.log(chalk.green(`✔ Detached ${removed?.name}`));
+              }
+            }
+            continue;
+          }
           default:
             console.log(chalk.yellow(`Unknown command: /${cmd} (try /help)`));
             continue;
@@ -144,17 +190,27 @@ export async function runChatRepl(opts: ReplOptions): Promise<void> {
 
       activeController = new AbortController();
       try {
+        const blocks = await buildMessageBlocks(
+          client,
+          conversationId,
+          staged,
+          line,
+          (image, index, total) => {
+            console.log(chalk.dim(`↑ Uploading ${image.name} (${index + 1}/${total})…`));
+          },
+        );
         await sendMessage(
           client,
           conversationId,
           workflow,
-          line,
+          blocks,
           renderer,
           activeController.signal,
           (id) => {
             activeTaskId = id;
           },
         );
+        staged = [];
       } catch (err) {
         renderer.finishLine();
         if (err instanceof ApiError) {
@@ -177,13 +233,13 @@ async function sendMessage(
   client: DigenClient,
   conversationId: string,
   workflow: string,
-  text: string,
+  blocks: ChatBlock[],
   renderer: ChatRenderer,
   signal: AbortSignal,
   onTaskId: (taskId: string | null) => void,
 ): Promise<void> {
   const { taskId, events } = await client.chatStream({
-    blocks: [{ type: "text", content: text }],
+    blocks,
     conversationId,
     workflow,
     signal,

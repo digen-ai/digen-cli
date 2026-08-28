@@ -70,6 +70,22 @@ export interface PresignResponse {
   expires_at: string;
 }
 
+export interface UploadPresignResponse {
+  upload_url: string;
+  final_url: string;
+  key: string;
+  max_size: number;
+}
+
+export interface UploadedAsset {
+  asset_id: string;
+  uri: string;
+  type: string;
+  source: string;
+  providers: string[];
+  parsing_status?: string | null;
+}
+
 export interface DigenClientOptions {
   apiUrl: string;
   token?: string;
@@ -294,6 +310,58 @@ export class DigenClient {
       body: JSON.stringify({ items }),
     });
     return data as PresignResponse;
+  }
+
+  // ==================== Uploads ====================
+
+  /** Step 1: ask the API for a presigned S3 PUT URL for this file. */
+  async presignUpload(
+    conversationId: string,
+    opts: { filename: string; contentType: string },
+  ): Promise<UploadPresignResponse> {
+    const qs = new URLSearchParams({ conversation_id: conversationId });
+    const data = await this.json("POST", `/api/v1/upload/presign?${qs.toString()}`, {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename: opts.filename, content_type: opts.contentType }),
+    });
+    return data as UploadPresignResponse;
+  }
+
+  /**
+   * Step 2: PUT the file bytes straight to S3 using the presigned URL. This
+   * goes directly to the presigned host, not through the gateway, so it must
+   * not carry any `digen-token`/`digen-sessionid` headers — only the two
+   * headers that are SigV4-signed into the URL.
+   */
+  async uploadToPresignedUrl(uploadUrl: string, body: Buffer, contentType: string): Promise<void> {
+    const resp = await this.fetchImpl(uploadUrl, {
+      method: "PUT",
+      body,
+      headers: {
+        "Content-Type": contentType,
+        "x-amz-acl": "public-read",
+      },
+    });
+    if (!resp.ok) {
+      throw new ApiError(resp.status, `Failed to upload file to storage: HTTP ${resp.status}`);
+    }
+  }
+
+  /** Step 3: register the uploaded S3 object as an asset on the conversation. */
+  async registerUploadedAsset(
+    conversationId: string,
+    opts: { url: string; assetType: string; contentType?: string; filename?: string },
+  ): Promise<UploadedAsset> {
+    const data = await this.json("POST", `/api/v1/conversations/${conversationId}/assets/upload`, {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: opts.url,
+        asset_type: opts.assetType,
+        content_type: opts.contentType,
+        filename: opts.filename,
+      }),
+    });
+    return data as UploadedAsset;
   }
 
   // ==================== Tasks ====================

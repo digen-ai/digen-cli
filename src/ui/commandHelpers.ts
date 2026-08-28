@@ -16,6 +16,9 @@ export function printHelp(): void {
   console.log("  /sessions         list your conversations");
   console.log("  /history          print this conversation's history");
   console.log("  /workflow [name]  show or change the workflow for new conversations");
+  console.log("  /attach <path>    stage a local image to send with your next message");
+  console.log("  /attachments      list staged images");
+  console.log("  /detach [n|all]   remove a staged image (default: all)");
   console.log("  /cancel           cancel the currently running task");
   console.log("  /confirm          confirm a pending await_confirmation prompt");
   console.log("  /help             show this help");

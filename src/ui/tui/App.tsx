@@ -3,6 +3,12 @@ import { Box, Static, Text, useApp, useInput } from "ink";
 import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { DigenClient } from "../../lib/client.js";
 import { ApiError } from "../../lib/errors.js";
+import {
+  type StagedImage,
+  buildMessageBlocks,
+  formatBytes,
+  stageImage,
+} from "../../lib/uploads.js";
 import { printApiError, printHelp, printHistory } from "../commandHelpers.js";
 import { TranscriptStore } from "../transcript.js";
 import { TranscriptLineView } from "./TranscriptLineView.js";
@@ -26,6 +32,9 @@ export function ChatTui({
   const [workflow, setWorkflow] = useState(initialWorkflow);
   const [inputValue, setInputValue] = useState("");
   const [busy, setBusy] = useState(false);
+  const [stagedImages, setStagedImages] = useState<StagedImage[]>([]);
+  const stagedImagesRef = useRef(stagedImages);
+  stagedImagesRef.current = stagedImages;
 
   const storeRef = useRef<TranscriptStore | null>(null);
   if (!storeRef.current) storeRef.current = new TranscriptStore({ client, images });
@@ -118,6 +127,55 @@ export function ChatTui({
             console.log(chalk.dim("No task is awaiting confirmation"));
           }
           return undefined;
+        case "attach": {
+          if (!arg) {
+            console.log(chalk.yellow("Usage: /attach <path-to-image>"));
+            return undefined;
+          }
+          try {
+            const image = stageImage(arg);
+            const nextCount = stagedImagesRef.current.length + 1;
+            setStagedImages((prev) => [...prev, image]);
+            console.log(
+              chalk.green(
+                `✔ Attached ${image.name} (${formatBytes(image.size)}) — ${nextCount} image${nextCount === 1 ? "" : "s"} staged`,
+              ),
+            );
+          } catch (err) {
+            console.log(chalk.red(err instanceof Error ? err.message : String(err)));
+          }
+          return undefined;
+        }
+        case "attachments": {
+          const list = stagedImagesRef.current;
+          if (list.length === 0) {
+            console.log(chalk.dim("No images staged"));
+          } else {
+            list.forEach((image, i) => {
+              console.log(`  ${i + 1}. ${image.name} (${formatBytes(image.size)})`);
+            });
+          }
+          return undefined;
+        }
+        case "detach": {
+          const list = stagedImagesRef.current;
+          if (!arg || arg === "all") {
+            setStagedImages([]);
+            console.log(
+              chalk.green(`✔ Detached ${list.length} image${list.length === 1 ? "" : "s"}`),
+            );
+          } else {
+            const index = Number.parseInt(arg, 10);
+            if (!Number.isInteger(index) || index < 1 || index > list.length) {
+              console.log(chalk.yellow(`Usage: /detach [n|all] (1-${list.length || 0})`));
+            } else {
+              const removed = list[index - 1];
+              setStagedImages(list.filter((_, i) => i !== index - 1));
+              console.log(chalk.green(`✔ Detached ${removed?.name}`));
+            }
+          }
+          return undefined;
+        }
         default:
           console.log(chalk.yellow(`Unknown command: /${cmd} (try /help)`));
           return undefined;
@@ -134,22 +192,35 @@ export function ChatTui({
         return;
       }
 
-      store.startTurn(text);
+      const imagesToSend = stagedImagesRef.current;
+      const attachmentSuffix =
+        imagesToSend.length > 0 ? `📎 ${imagesToSend.map((i) => i.name).join(", ")}` : "";
+      store.startTurn([text, attachmentSuffix].filter(Boolean).join(" "));
       setBusy(true);
       const controller = new AbortController();
       activeControllerRef.current = controller;
       try {
+        const blocks = await buildMessageBlocks(
+          client,
+          conversationIdRef.current,
+          imagesToSend,
+          text,
+          (image, index, total) => {
+            console.log(chalk.dim(`↑ Uploading ${image.name} (${index + 1}/${total})…`));
+          },
+        );
         await runTurn(
           client,
           conversationIdRef.current,
           workflowRef.current,
-          text,
+          blocks,
           store,
           controller.signal,
           (id) => {
             activeTaskIdRef.current = id;
           },
         );
+        setStagedImages([]);
       } catch (err) {
         if (!(err instanceof Error && err.name === "AbortError")) {
           if (err instanceof ApiError) printApiError(err);
@@ -188,7 +259,7 @@ export function ChatTui({
     if (key.return) {
       const text = inputValue.trim();
       setInputValue("");
-      if (text) void submit(text);
+      if (text || stagedImagesRef.current.length > 0) void submit(text);
       return;
     }
     if (key.backspace || key.delete) {
@@ -227,6 +298,11 @@ export function ChatTui({
           <TranscriptLineView key={line.id} line={line} />
         ))}
       </Box>
+      {stagedImages.length > 0 && (
+        <Text dimColor>
+          📎 {stagedImages.length} staged: {stagedImages.map((i) => i.name).join(", ")}
+        </Text>
+      )}
       <Box>
         <Text color="cyan">{"> "}</Text>
         <Text>{inputValue}</Text>

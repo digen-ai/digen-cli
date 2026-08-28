@@ -5,7 +5,7 @@
  */
 
 import chalk from "chalk";
-import type { DigenClient } from "../../lib/client.js";
+import type { ChatBlock, DigenClient } from "../../lib/client.js";
 import type { ChatEvent } from "../../lib/sse.js";
 import type { TranscriptStore, TurnOutcome } from "../transcript.js";
 
@@ -15,13 +15,13 @@ export async function runTurn(
   client: DigenClient,
   conversationId: string,
   workflow: string,
-  text: string,
+  blocks: ChatBlock[],
   store: TranscriptStore,
   signal: AbortSignal,
   onTaskId: (taskId: string | null) => void,
 ): Promise<void> {
   const { taskId, events } = await client.chatStream({
-    blocks: [{ type: "text", content: text }],
+    blocks,
     conversationId,
     workflow,
     signal,

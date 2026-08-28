@@ -71,6 +71,9 @@ Slash commands available inside the chat:
 | `/sessions` | List your conversations |
 | `/history` | Print this conversation's history |
 | `/workflow [name]` | Show or change the workflow used for new conversations |
+| `/attach <path>` | Stage a local image to send with your next message |
+| `/attachments` | List staged images |
+| `/detach [n\|all]` | Remove a staged image (default: all) |
 | `/cancel` | Cancel the currently running task |
 | `/confirm` | Confirm a pending `await_confirmation` prompt |
 | `/help` | Show this list |
@@ -90,11 +93,61 @@ Pass `--no-images` or set `DIGEN_IMAGES=off` to skip resolving assets to a presi
 entirely — you'll see the raw link the server sent instead; this happens automatically when output
 isn't a TTY (e.g. piped to a file).
 
+### Attaching images
+
+```
+/attach ./cat.jpg
+/attach ~/Pictures/dog.png
+```
+
+`/attach <path>` stages a local image (`.jpg`, `.jpeg`, `.png`, `.gif`, or `.webp`); stage as
+many as you like, then type your message and press Enter — the staged images upload first and
+are sent alongside the text as image blocks. Sending with no text is fine if you just want to
+share the image(s). Use `/attachments` to see what's staged, and `/detach <n>` or `/detach` (no
+argument detaches everything) to remove one before sending. If an upload fails, the message isn't
+sent and the staged images are kept so you can retry.
+
 ### Resuming a conversation
 
 ```bash
 digen chat --conversation conv_abc123
 ```
+
+## Use with Codex (MCP)
+
+`digen` also ships an MCP server, `digen-mcp`, so agents like [Codex CLI](https://developers.openai.com/codex)
+can call Digen automatically instead of you driving the chat by hand.
+
+```bash
+npm install -g digen
+digen login
+codex mcp add digen -- digen-mcp
+```
+
+This is equivalent to adding the following to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.digen]
+command = "digen-mcp"
+tool_timeout_sec = 60
+```
+
+`digen-mcp` reuses the credentials saved by `digen login` (`~/.digen/cli.yaml`) — no token is passed
+through the Codex configuration. Because Digen workflows can take anywhere from a few seconds to
+several minutes (e.g. generating a video or image), chatting is split into two tools instead of one
+blocking call:
+
+| Tool | Purpose |
+| --- | --- |
+| `digen_send` | Send a message to a workflow; returns a `task_id` immediately |
+| `digen_poll` | Check a task's status/output; call repeatedly until `done`/`error`/`cancelled` |
+| `digen_confirm` | Confirm or cancel a task that is `await_confirmation` |
+| `digen_cancel` | Cancel a running task |
+| `digen_list_workflows` | List available workflows |
+| `digen_history` | Fetch a conversation's message history |
+
+Codex (or any other MCP client) discovers these tools automatically and calls them as needed —
+no shell wrapping or manual invocation required.
 
 ## How it works
 
