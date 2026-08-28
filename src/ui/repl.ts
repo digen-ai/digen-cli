@@ -18,6 +18,7 @@ export interface ReplOptions {
   client: DigenClient;
   conversationId: string;
   workflow: string;
+  images?: "auto" | "off";
 }
 
 function printHelp(): void {
@@ -38,7 +39,7 @@ export async function runChatRepl(opts: ReplOptions): Promise<void> {
   const { client } = opts;
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const renderer = new ChatRenderer();
+  const renderer = new ChatRenderer({ client, images: opts.images ?? "auto" });
   let activeController: AbortController | null = null;
   let activeTaskId: string | null = null;
 
@@ -236,8 +237,12 @@ async function consumeWithResume(
       for await (const event of current) {
         if (typeof event.sequence === "number") lastSequence = event.sequence;
         outcome = renderer.handle(event);
-        if (outcome.kind === "done" || outcome.kind === "error") return;
+        if (outcome.kind === "done" || outcome.kind === "error") {
+          if (!signal.aborted) await renderer.flushAssets();
+          return;
+        }
       }
+      if (!signal.aborted) await renderer.flushAssets();
       return; // stream ended without an explicit done/error event
     } catch (err) {
       if (signal.aborted) return;

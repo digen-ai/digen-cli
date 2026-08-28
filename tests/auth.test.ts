@@ -50,7 +50,8 @@ describe("TokenCaptureServer (loopback)", () => {
       body,
     });
 
-    const [result, postResponse] = await Promise.all([server.waitForResult(5000), postDone]);
+    const timeoutsBefore = process.getActiveResourcesInfo().filter((t) => t === "Timeout").length;
+    const [result, postResponse] = await Promise.all([server.waitForResult(60_000), postDone]);
 
     expect(postResponse.status).toBe(200);
     expect(result).toEqual({
@@ -61,6 +62,8 @@ describe("TokenCaptureServer (loopback)", () => {
       id: "99",
       sessionid: "sess_e2e",
     });
+    const timeoutsAfter = process.getActiveResourcesInfo().filter((t) => t === "Timeout").length;
+    expect(timeoutsAfter).toBeLessThanOrEqual(timeoutsBefore);
   });
 
   it("times out with a null result if no callback arrives", async () => {

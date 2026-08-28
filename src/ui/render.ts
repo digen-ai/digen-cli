@@ -10,6 +10,9 @@
 import chalk from "chalk";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
+import terminalImage from "terminal-image";
+import { fetchImageBuffer, isInlineImage, pickUrl } from "../lib/assets.js";
+import type { DigenClient } from "../lib/client.js";
 import type { ChatEvent } from "../lib/sse.js";
 
 marked.use(
@@ -38,11 +41,110 @@ export type TurnOutcome =
   | { kind: "error"; message: string }
   | { kind: "await_confirmation"; confirmationType?: string; message?: string };
 
+export interface ChatRendererOptions {
+  /** Client used to resolve `asset_id` -> presigned URL. Omit to disable resolution entirely. */
+  client?: DigenClient;
+  /** Set to "off" to skip image resolution/rendering and just print raw asset links. */
+  images?: "auto" | "off";
+}
+
+interface PendingAssetInfo {
+  assetId?: string;
+  providers: string[];
+  thumbProviders?: string[];
+  /** Already-resolved HTTPS URL, if the event carried one directly (skips presign). */
+  directUrl?: string;
+  /** s3:// (or other non-fetchable) URI to fall back to when resolution fails. */
+  fallbackUri: string;
+  isImage: boolean;
+}
+
+const MAX_CONCURRENT_DOWNLOADS = 3;
+
 export class ChatRenderer {
   private currentTextAgent: string | null = null;
   private atLineStart = true;
   private thinkingOpen = false;
   private toolStack: string[] = [];
+  private client?: DigenClient;
+  private imagesEnabled: boolean;
+  private pendingAssets: Promise<() => void>[] = [];
+  private activeDownloads = 0;
+  private downloadQueue: Array<() => void> = [];
+
+  constructor(opts?: ChatRendererOptions) {
+    this.client = opts?.client;
+    this.imagesEnabled = (opts?.images ?? "auto") !== "off";
+  }
+
+  private async withDownloadSlot<T>(fn: () => Promise<T>): Promise<T> {
+    while (this.activeDownloads >= MAX_CONCURRENT_DOWNLOADS) {
+      await new Promise<void>((resolve) => this.downloadQueue.push(resolve));
+    }
+    this.activeDownloads++;
+    try {
+      return await fn();
+    } finally {
+      this.activeDownloads--;
+      const next = this.downloadQueue.shift();
+      if (next) next();
+    }
+  }
+
+  private async prepareAsset(info: PendingAssetInfo): Promise<() => void> {
+    try {
+      let resolvedUrl = info.directUrl;
+      let thumbUrl = info.directUrl;
+      if (!resolvedUrl && this.client && info.assetId && info.providers.length > 0) {
+        const presign = await this.client.getPresignedUrls([
+          {
+            asset_id: info.assetId,
+            providers: info.providers,
+            thumbnail_providers: info.thumbProviders,
+          },
+        ]);
+        const result = presign.results[0];
+        if (!result || result.error) throw new Error(result?.error ?? "presign failed");
+        resolvedUrl = pickUrl(result.urls, info.providers);
+        thumbUrl = pickUrl(result.thumbnail_urls, info.thumbProviders) ?? resolvedUrl;
+      }
+      if (!resolvedUrl) throw new Error("no url available");
+
+      if (!info.isImage) {
+        return () => {
+          this.ensureNewline();
+          this.write(chalk.dim(`     ${resolvedUrl}\n`));
+        };
+      }
+
+      const buffer = await this.withDownloadSlot(() =>
+        fetchImageBuffer(thumbUrl ?? (resolvedUrl as string)),
+      );
+      const width = Math.min(process.stdout.columns || 80, 60);
+      const ansi = await terminalImage.buffer(buffer, { width });
+      return () => {
+        this.ensureNewline();
+        this.write(ansi);
+        this.write(chalk.dim(`     ${resolvedUrl}\n`));
+      };
+    } catch {
+      const link = info.directUrl || info.fallbackUri;
+      return () => {
+        if (!link) return;
+        this.ensureNewline();
+        this.write(chalk.dim(`     ${link}\n`));
+      };
+    }
+  }
+
+  /** Await all pending asset resolutions/downloads and print them in arrival order. */
+  async flushAssets(): Promise<void> {
+    const pending = this.pendingAssets;
+    if (pending.length === 0) return;
+    this.pendingAssets = [];
+    const thunks = await Promise.all(pending);
+    for (const thunk of thunks) thunk();
+  }
 
   private write(text: string): void {
     process.stdout.write(text);
@@ -124,9 +226,38 @@ export class ChatRenderer {
         const data = event.data ?? {};
         const assetType = (data.type as string | undefined) ?? "asset";
         const name = (data.name as string | undefined) ?? "";
-        const url = (data.url as string | undefined) ?? (data.uri as string | undefined) ?? "";
+
+        if (event.phase === "placeholder") {
+          this.write(chalk.dim(`  🖼 ${assetType}${name ? `: ${name}` : ""} (generating…)\n`));
+          return { kind: "continue" };
+        }
+
         this.write(chalk.blueBright(`  🖼 ${assetType}${name ? `: ${name}` : ""}\n`));
-        if (url) this.write(chalk.dim(`     ${url}\n`));
+
+        const directUrl = data.url as string | undefined;
+        const fallbackUri = (data.uri as string | undefined) ?? "";
+        const assetId = data.asset_id as string | undefined;
+        const providers = (data.providers as string[] | undefined) ?? [];
+        const thumbProviders = data.thumb_providers as string[] | undefined;
+        const isImage = isInlineImage(assetType);
+        const canResolve =
+          this.imagesEnabled &&
+          Boolean(directUrl || (this.client && assetId && providers.length > 0));
+
+        if (canResolve) {
+          this.pendingAssets.push(
+            this.prepareAsset({
+              assetId,
+              providers,
+              thumbProviders,
+              directUrl,
+              fallbackUri,
+              isImage,
+            }),
+          );
+        } else if (directUrl || fallbackUri) {
+          this.write(chalk.dim(`     ${directUrl || fallbackUri}\n`));
+        }
         return { kind: "continue" };
       }
 

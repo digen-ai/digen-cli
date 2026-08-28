@@ -11,13 +11,18 @@ export function registerChatCommand(program: Command): void {
     .description("Start an interactive chat session")
     .option("-w, --workflow <name>", "Workflow to use (default: configured default_workflow)")
     .option("-c, --conversation <id>", "Resume an existing conversation")
-    .action(async (opts: { workflow?: string; conversation?: string }) => {
+    .option("--no-images", "Print asset links instead of rendering images inline")
+    .action(async (opts: { workflow?: string; conversation?: string; images?: boolean }) => {
       if (!requireLogin()) {
         process.exitCode = 1;
         return;
       }
       const client = getClient();
       const workflow = opts.workflow ?? getDefaultWorkflow();
+      const images: "auto" | "off" =
+        opts.images === false || process.env.DIGEN_IMAGES === "off" || !process.stdout.isTTY
+          ? "off"
+          : "auto";
 
       let conversationId = opts.conversation;
       let resolvedWorkflow = workflow;
@@ -35,6 +40,6 @@ export function registerChatCommand(program: Command): void {
         return;
       }
 
-      await runChatRepl({ client, conversationId, workflow: resolvedWorkflow });
+      await runChatRepl({ client, conversationId, workflow: resolvedWorkflow, images });
     });
 }

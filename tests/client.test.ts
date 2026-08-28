@@ -109,6 +109,45 @@ describe("DigenClient", () => {
     ]);
   });
 
+  it("fetches presigned urls for a batch of assets, passing through per-item errors", async () => {
+    server.use(
+      http.post(
+        `${BASE_URL}${GATEWAY_PREFIX}/api/v1/assets/presigned-urls`,
+        async ({ request }) => {
+          const body = (await request.json()) as { items: Array<{ asset_id: string }> };
+          expect(body.items).toEqual([
+            { asset_id: "img_1", providers: ["aws"], thumbnail_providers: ["aws"] },
+            { asset_id: "img_2", providers: ["aws"] },
+          ]);
+          return HttpResponse.json({
+            results: [
+              {
+                asset_id: "img_1",
+                urls: { aws: "https://bucket.s3.example/img_1.jpg" },
+                thumbnail_urls: { aws: "https://bucket.s3.example/img_1_thumb.jpg" },
+                error: null,
+              },
+              {
+                asset_id: "img_2",
+                urls: {},
+                thumbnail_urls: null,
+                error: "Access denied to asset: img_2",
+              },
+            ],
+            expires_at: "2026-02-06T13:00:00Z",
+          });
+        },
+      ),
+    );
+    const client = makeClient();
+    const res = await client.getPresignedUrls([
+      { asset_id: "img_1", providers: ["aws"], thumbnail_providers: ["aws"] },
+      { asset_id: "img_2", providers: ["aws"] },
+    ]);
+    expect(res.results[0]?.urls.aws).toBe("https://bucket.s3.example/img_1.jpg");
+    expect(res.results[1]?.error).toBe("Access denied to asset: img_2");
+  });
+
   it("raises a plain ApiError for a 404 with a FastAPI-style detail body", async () => {
     server.use(
       http.get(`${BASE_URL}${GATEWAY_PREFIX}/api/v1/conversations/missing`, () =>

@@ -67,6 +67,8 @@ export class TokenCaptureServer {
       this.resultResolve = resolve;
     });
     this.server = createServer((req, res) => this.handleRequest(req, res));
+    // Drop the socket after the response so server.close() is not held by keep-alive.
+    this.server.keepAliveTimeout = 0;
   }
 
   async listen(port = 0): Promise<this> {
@@ -109,17 +111,19 @@ export class TokenCaptureServer {
         sessionid: qs.get("sessionid") || qs.get("sessionId"),
       };
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(CALLBACK_HTML);
-      if (!this.settled) {
-        this.settled = true;
-        this.resultResolve(result);
-      }
+      res.end(CALLBACK_HTML, () => {
+        if (!this.settled) {
+          this.settled = true;
+          this.resultResolve(result);
+        }
+      });
     });
   }
 
   async waitForResult(timeoutMs = LOOPBACK_TIMEOUT_MS): Promise<LoginCallbackResult | null> {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<null>((resolve) => {
-      setTimeout(() => {
+      timeoutId = setTimeout(() => {
         if (!this.settled) {
           this.settled = true;
           this.resultResolve(null);
@@ -127,9 +131,18 @@ export class TokenCaptureServer {
         resolve(null);
       }, timeoutMs);
     });
-    const result = await Promise.race([this.resultPromise, timeout]);
+    try {
+      return await Promise.race([this.resultPromise, timeout]);
+    } finally {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+      await this.close();
+    }
+  }
+
+  private async close(): Promise<void> {
     await new Promise<void>((resolve) => this.server.close(() => resolve()));
-    return result;
   }
 }
 

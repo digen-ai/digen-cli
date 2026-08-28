@@ -34,7 +34,8 @@
     "js-yaml": "^4.1.0",
     "marked": "^13.0.3",
     "marked-terminal": "^7.1.0",
-    "open": "^10.1.0"
+    "open": "^10.1.0",
+    "terminal-image": "^5.0.1"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

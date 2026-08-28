@@ -52,6 +52,24 @@ export interface ChatStreamResult {
   events: AsyncGenerator<ChatEvent>;
 }
 
+export interface PresignItem {
+  asset_id: string;
+  providers: string[];
+  thumbnail_providers?: string[];
+}
+
+export interface PresignResult {
+  asset_id: string;
+  urls: Record<string, string>;
+  thumbnail_urls: Record<string, string> | null;
+  error: string | null;
+}
+
+export interface PresignResponse {
+  results: PresignResult[];
+  expires_at: string;
+}
+
 export interface DigenClientOptions {
   apiUrl: string;
   token?: string;
@@ -266,6 +284,16 @@ export class DigenClient {
       throw new ApiError(resp.status, "Empty response body for resume stream");
     }
     return parseChatEvents(resp.body);
+  }
+
+  // ==================== Assets ====================
+
+  async getPresignedUrls(items: PresignItem[]): Promise<PresignResponse> {
+    const data = await this.json("POST", "/api/v1/assets/presigned-urls", {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items }),
+    });
+    return data as PresignResponse;
   }
 
   // ==================== Tasks ====================
