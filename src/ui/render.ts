@@ -1,6 +1,12 @@
 /**
  * Renders the Digen SSE chat event stream to the terminal.
  *
+ * This is the non-interactive fallback used when stdout/stdin aren't a TTY
+ * (piped output, `--no-images`/`DIGEN_IMAGES=off`, non-interactive shells):
+ * plain sequential writes, no mouse, no inline images — every asset (image
+ * included) is just a link. The interactive terminal experience, including
+ * hover-to-preview, lives in `ui/tui/` on top of `ui/transcript.ts` instead.
+ *
  * Assistant text (`chunk`) is written raw as it streams in, since partial
  * markdown can't be safely re-parsed mid-stream; completed messages (e.g.
  * conversation history) are rendered as full markdown instead (see
@@ -10,8 +16,7 @@
 import chalk from "chalk";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
-import terminalImage from "terminal-image";
-import { fetchImageBuffer, isInlineImage, pickUrl } from "../lib/assets.js";
+import { pickUrl } from "../lib/assets.js";
 import type { DigenClient } from "../lib/client.js";
 import type { ChatEvent } from "../lib/sse.js";
 
@@ -57,7 +62,7 @@ export type TurnOutcome =
 export interface ChatRendererOptions {
   /** Client used to resolve `asset_id` -> presigned URL. Omit to disable resolution entirely. */
   client?: DigenClient;
-  /** Set to "off" to skip image resolution/rendering and just print raw asset links. */
+  /** Set to "off" to skip presigning and just print the raw asset link as-is. */
   images?: "auto" | "off";
 }
 
@@ -69,10 +74,7 @@ interface PendingAssetInfo {
   directUrl?: string;
   /** s3:// (or other non-fetchable) URI to fall back to when resolution fails. */
   fallbackUri: string;
-  isImage: boolean;
 }
-
-const MAX_CONCURRENT_DOWNLOADS = 3;
 
 export class ChatRenderer {
   private currentTextAgent: string | null = null;
@@ -82,32 +84,15 @@ export class ChatRenderer {
   private client?: DigenClient;
   private imagesEnabled: boolean;
   private pendingAssets: Promise<() => void>[] = [];
-  private activeDownloads = 0;
-  private downloadQueue: Array<() => void> = [];
 
   constructor(opts?: ChatRendererOptions) {
     this.client = opts?.client;
     this.imagesEnabled = (opts?.images ?? "auto") !== "off";
   }
 
-  private async withDownloadSlot<T>(fn: () => Promise<T>): Promise<T> {
-    while (this.activeDownloads >= MAX_CONCURRENT_DOWNLOADS) {
-      await new Promise<void>((resolve) => this.downloadQueue.push(resolve));
-    }
-    this.activeDownloads++;
-    try {
-      return await fn();
-    } finally {
-      this.activeDownloads--;
-      const next = this.downloadQueue.shift();
-      if (next) next();
-    }
-  }
-
   private async prepareAsset(info: PendingAssetInfo): Promise<() => void> {
     try {
       let resolvedUrl = info.directUrl;
-      let thumbUrl = info.directUrl;
       if (!resolvedUrl && this.client && info.assetId && info.providers.length > 0) {
         const presign = await this.client.getPresignedUrls([
           {
@@ -119,25 +104,11 @@ export class ChatRenderer {
         const result = presign.results[0];
         if (!result || result.error) throw new Error(result?.error ?? "presign failed");
         resolvedUrl = pickUrl(result.urls, info.providers);
-        thumbUrl = pickUrl(result.thumbnail_urls, info.thumbProviders) ?? resolvedUrl;
       }
       if (!resolvedUrl) throw new Error("no url available");
 
-      if (!info.isImage) {
-        return () => {
-          this.ensureNewline();
-          this.write(chalk.dim(`     ${resolvedUrl}\n`));
-        };
-      }
-
-      const buffer = await this.withDownloadSlot(() =>
-        fetchImageBuffer(thumbUrl ?? (resolvedUrl as string)),
-      );
-      const width = Math.min(process.stdout.columns || 80, 60);
-      const ansi = await terminalImage.buffer(buffer, { width });
       return () => {
         this.ensureNewline();
-        this.write(ansi);
         this.write(chalk.dim(`     ${resolvedUrl}\n`));
       };
     } catch {
@@ -252,21 +223,13 @@ export class ChatRenderer {
         const assetId = data.asset_id as string | undefined;
         const providers = (data.providers as string[] | undefined) ?? [];
         const thumbProviders = data.thumb_providers as string[] | undefined;
-        const isImage = isInlineImage(assetType);
         const canResolve =
           this.imagesEnabled &&
           Boolean(directUrl || (this.client && assetId && providers.length > 0));
 
         if (canResolve) {
           this.pendingAssets.push(
-            this.prepareAsset({
-              assetId,
-              providers,
-              thumbProviders,
-              directUrl,
-              fallbackUri,
-              isImage,
-            }),
+            this.prepareAsset({ assetId, providers, thumbProviders, directUrl, fallbackUri }),
           );
         } else if (directUrl || fallbackUri) {
           this.write(chalk.dim(`     ${directUrl || fallbackUri}\n`));

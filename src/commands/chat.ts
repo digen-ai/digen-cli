@@ -4,6 +4,7 @@ import { getDefaultWorkflow } from "../lib/config.js";
 import { ApiError } from "../lib/errors.js";
 import { getClient, requireLogin } from "../lib/session.js";
 import { runChatRepl } from "../ui/repl.js";
+import { runChatTui } from "../ui/tui/index.js";
 
 export function registerChatCommand(program: Command): void {
   program
@@ -11,7 +12,7 @@ export function registerChatCommand(program: Command): void {
     .description("Start an interactive chat session")
     .option("-w, --workflow <name>", "Workflow to use (default: configured default_workflow)")
     .option("-c, --conversation <id>", "Resume an existing conversation")
-    .option("--no-images", "Print asset links instead of rendering images inline")
+    .option("--no-images", "Show raw asset links as-is instead of resolving them to presigned URLs")
     .action(async (opts: { workflow?: string; conversation?: string; images?: boolean }) => {
       if (!requireLogin()) {
         process.exitCode = 1;
@@ -40,6 +41,14 @@ export function registerChatCommand(program: Command): void {
         return;
       }
 
-      await runChatRepl({ client, conversationId, workflow: resolvedWorkflow, images });
+      // The TUI needs a real keyboard (stdin) and screen (stdout) to drive
+      // mouse hover/click; anything else (piped output, non-interactive
+      // shells, SSH without a pty) falls back to the plain line-based REPL.
+      const interactive = process.stdout.isTTY && process.stdin.isTTY;
+      if (interactive) {
+        await runChatTui({ client, conversationId, workflow: resolvedWorkflow, images });
+      } else {
+        await runChatRepl({ client, conversationId, workflow: resolvedWorkflow, images });
+      }
     });
 }

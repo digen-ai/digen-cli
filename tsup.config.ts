@@ -12,4 +12,8 @@ export default defineConfig({
   banner: {
     js: "#!/usr/bin/env node",
   },
+  esbuildOptions(options) {
+    options.jsx = "automatic";
+    options.jsxImportSource = "react";
+  },
 });

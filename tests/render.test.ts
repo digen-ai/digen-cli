@@ -1,23 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DigenClient, PresignResponse } from "../src/lib/client.js";
-
-vi.mock("terminal-image", () => ({
-  default: {
-    buffer: vi.fn(async () => "<<ANSI-IMAGE>>\n"),
-  },
-}));
-
-vi.mock("../src/lib/assets.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/lib/assets.js")>();
-  return {
-    ...actual,
-    fetchImageBuffer: vi.fn(async () => Buffer.from([1, 2, 3])),
-  };
-});
-
-const { ChatRenderer } = await import("../src/ui/render.js");
-const terminalImage = (await import("terminal-image")).default;
-const { fetchImageBuffer } = await import("../src/lib/assets.js");
+import { ChatRenderer } from "../src/ui/render.js";
 
 function fakeClient(impl: (items: unknown) => Promise<PresignResponse>): DigenClient {
   return { getPresignedUrls: impl } as unknown as DigenClient;
@@ -33,14 +16,11 @@ function captureOutput() {
 }
 
 describe("ChatRenderer asset handling", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("renders an inline image via terminal-image after presign + download succeed", async () => {
+  it("resolves an image to a plain link via presign — no inline rendering here", async () => {
     const client = fakeClient(async () => ({
       results: [
         {
@@ -68,10 +48,7 @@ describe("ChatRenderer asset handling", () => {
     });
     await renderer.flushAssets();
 
-    expect(fetchImageBuffer).toHaveBeenCalledWith("https://bucket.s3.example/img_1_thumb.jpg");
-    expect(terminalImage.buffer).toHaveBeenCalled();
     const text = out.text();
-    expect(text).toContain("<<ANSI-IMAGE>>");
     expect(text).toContain("https://bucket.s3.example/img_1.jpg");
     expect(text).not.toContain("s3://bucket/img_1.jpg");
   });
@@ -103,41 +80,10 @@ describe("ChatRenderer asset handling", () => {
     });
     await renderer.flushAssets();
 
-    expect(terminalImage.buffer).not.toHaveBeenCalled();
     expect(out.text()).toContain("s3://bucket/img_1.jpg");
   });
 
-  it("falls back to the s3 uri link when the download throws", async () => {
-    vi.mocked(fetchImageBuffer).mockRejectedValueOnce(new Error("boom"));
-    const client = fakeClient(async () => ({
-      results: [
-        {
-          asset_id: "img_1",
-          urls: { aws: "https://bucket.s3.example/img_1.jpg" },
-          thumbnail_urls: null,
-          error: null,
-        },
-      ],
-      expires_at: "2026-02-06T13:00:00Z",
-    }));
-    const renderer = new ChatRenderer({ client, images: "auto" });
-    const out = captureOutput();
-
-    renderer.handle({
-      type: "asset",
-      data: {
-        type: "image",
-        asset_id: "img_1",
-        providers: ["aws"],
-        uri: "s3://bucket/img_1.jpg",
-      },
-    });
-    await renderer.flushAssets();
-
-    expect(out.text()).toContain("s3://bucket/img_1.jpg");
-  });
-
-  it("prints a dim placeholder line without queuing a download", async () => {
+  it("prints a dim placeholder line without presigning", async () => {
     const client = fakeClient(async () => {
       throw new Error("should not be called");
     });
@@ -152,7 +98,6 @@ describe("ChatRenderer asset handling", () => {
     await renderer.flushAssets();
 
     expect(out.text()).toContain("generating");
-    expect(terminalImage.buffer).not.toHaveBeenCalled();
   });
 
   it("prints the raw uri immediately when images are disabled", async () => {
@@ -174,10 +119,9 @@ describe("ChatRenderer asset handling", () => {
     await renderer.flushAssets();
 
     expect(out.text()).toContain("s3://bucket/img_1.jpg");
-    expect(terminalImage.buffer).not.toHaveBeenCalled();
   });
 
-  it("only prints a resolved link (no inline render) for non-image asset types", async () => {
+  it("resolves non-image asset types the exact same way as images", async () => {
     const client = fakeClient(async () => ({
       results: [
         {
@@ -203,7 +147,6 @@ describe("ChatRenderer asset handling", () => {
     });
     await renderer.flushAssets();
 
-    expect(terminalImage.buffer).not.toHaveBeenCalled();
     expect(out.text()).toContain("https://bucket.s3.example/vid_1.mp4");
   });
 });
