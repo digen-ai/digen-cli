@@ -87,14 +87,17 @@ export function TranscriptLineView({ line }: TranscriptLineViewProps) {
     }
 
     case "asset":
+      // A single `Text` is required (not a `Box` with two `Text` siblings):
+      // Ink lays out `Box` children as independent flex columns, so once the
+      // combined content needs to wrap, the label and link wrap in separate
+      // columns and interleave into garbage. One `Text` wraps them as a
+      // single continuous run, which also keeps each wrapped line of the
+      // OSC 8 hyperlink self-contained and clickable.
       return (
-        <Box>
-          <Text dimColor>
-            {"  "}
-            {assetLabel(line.data)}{" "}
-          </Text>
-          <Text dimColor>{assetSuffix(line.data)}</Text>
-        </Box>
+        <Text dimColor>
+          {"  "}
+          {assetLabel(line.data)} {assetSuffix(line.data)}
+        </Text>
       );
 
     case "guidanceHeader":
