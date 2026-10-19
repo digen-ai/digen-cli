@@ -15,6 +15,11 @@ import {
   getUserId,
   loadConfig,
 } from "./config.js";
+import { SkillsApi } from "./skillsApi.js";
+
+export function getSkillsApi(): SkillsApi {
+  return new SkillsApi(getClient());
+}
 
 export function getClient(): DigenClient {
   return new DigenClient({
@@ -33,6 +38,7 @@ export function requireLogin(): boolean {
   const cfg = loadConfig();
   if (!cfg.token && cfg.user_id === undefined) {
     console.error(chalk.red("Not logged in. Run: digen login"));
+    process.exitCode = 1;
     return false;
   }
   return true;

@@ -13,6 +13,7 @@ import { type ChatEvent, parseChatEvents } from "./sse.js";
 import { composeDigenToken } from "./token.js";
 
 export const GATEWAY_PREFIX = "/v2/gateway/agent";
+export const SKILLS_API_PATH = "/api/v1/skills";
 
 export type BlockType =
   | "text"
@@ -132,9 +133,29 @@ export class DigenClient {
     });
   }
 
-  private async json(method: string, path: string, init?: RequestInit): Promise<unknown> {
+  /** Send a request and parse its JSON body, raising `ApiError` on failure. */
+  async requestJson(method: string, path: string, init?: RequestInit): Promise<unknown> {
     const resp = await this.request(method, path, init);
     return this.parseJsonOrThrow(resp);
+  }
+
+  /** Send a request whose body is a `FormData` (multipart), without overriding Content-Type. */
+  async requestForm(method: string, path: string, form: FormData): Promise<unknown> {
+    const resp = await this.request(method, path, { body: form });
+    return this.parseJsonOrThrow(resp);
+  }
+
+  /** Send a request and return the raw response bytes (e.g. a zip export). */
+  async requestRaw(method: string, path: string, init?: RequestInit): Promise<Buffer> {
+    const resp = await this.request(method, path, init);
+    if (resp.status >= 400) {
+      await this.raiseForStatus(resp);
+    }
+    return Buffer.from(await resp.arrayBuffer());
+  }
+
+  private async json(method: string, path: string, init?: RequestInit): Promise<unknown> {
+    return this.requestJson(method, path, init);
   }
 
   private async parseJsonOrThrow(resp: Response): Promise<unknown> {
@@ -221,8 +242,14 @@ export class DigenClient {
     return data as Record<string, unknown>;
   }
 
-  async listConversations(limit = 50, offset = 0): Promise<ConversationSummary[]> {
+  async listConversations(
+    limit = 50,
+    offset = 0,
+    opts?: { bookmarkedOnly?: boolean; featuredStatus?: string },
+  ): Promise<ConversationSummary[]> {
     const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (opts?.bookmarkedOnly) qs.set("bookmarked_only", "true");
+    if (opts?.featuredStatus) qs.set("featured_status", opts.featuredStatus);
     const data = await this.json("GET", `/api/v1/conversations?${qs.toString()}`);
     if (Array.isArray(data)) return data as ConversationSummary[];
     const obj = data as { items?: ConversationSummary[] } | null;
@@ -231,11 +258,12 @@ export class DigenClient {
 
   async getConversationMessages(
     conversationId: string,
-    opts?: { limit?: number; before?: string },
+    opts?: { limit?: number; offset?: number; before?: number | string },
   ): Promise<Record<string, unknown>> {
     const qs = new URLSearchParams();
     if (opts?.limit) qs.set("limit", String(opts.limit));
-    if (opts?.before) qs.set("before", opts.before);
+    if (opts?.offset !== undefined) qs.set("offset", String(opts.offset));
+    if (opts?.before !== undefined) qs.set("before", String(opts.before));
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     const data = await this.json(
       "GET",
@@ -253,6 +281,14 @@ export class DigenClient {
     const resp = await this.request("PATCH", `/api/v1/conversations/${conversationId}/name`, {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
+    });
+    await this.raiseForStatus(resp);
+  }
+
+  async updateConversationWorkflow(conversationId: string, workflow: string): Promise<void> {
+    const resp = await this.request("PATCH", `/api/v1/conversations/${conversationId}/workflow`, {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workflow }),
     });
     await this.raiseForStatus(resp);
   }
@@ -317,12 +353,16 @@ export class DigenClient {
   /** Step 1: ask the API for a presigned S3 PUT URL for this file. */
   async presignUpload(
     conversationId: string,
-    opts: { filename: string; contentType: string },
+    opts: { filename: string; contentType: string; fileSize?: number },
   ): Promise<UploadPresignResponse> {
     const qs = new URLSearchParams({ conversation_id: conversationId });
     const data = await this.json("POST", `/api/v1/upload/presign?${qs.toString()}`, {
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ filename: opts.filename, content_type: opts.contentType }),
+      body: JSON.stringify({
+        filename: opts.filename,
+        content_type: opts.contentType,
+        file_size: opts.fileSize,
+      }),
     });
     return data as UploadPresignResponse;
   }
@@ -333,14 +373,19 @@ export class DigenClient {
    * not carry any `digen-token`/`digen-sessionid` headers — only the two
    * headers that are SigV4-signed into the URL.
    */
-  async uploadToPresignedUrl(uploadUrl: string, body: Buffer, contentType: string): Promise<void> {
+  async uploadToPresignedUrl(
+    uploadUrl: string,
+    body: Buffer,
+    contentType: string,
+    opts?: { acl?: string | null },
+  ): Promise<void> {
+    const headers: Record<string, string> = { "Content-Type": contentType };
+    const acl = opts?.acl === undefined ? "public-read" : opts.acl;
+    if (acl) headers["x-amz-acl"] = acl;
     const resp = await this.fetchImpl(uploadUrl, {
       method: "PUT",
       body,
-      headers: {
-        "Content-Type": contentType,
-        "x-amz-acl": "public-read",
-      },
+      headers,
     });
     if (!resp.ok) {
       throw new ApiError(resp.status, `Failed to upload file to storage: HTTP ${resp.status}`);
@@ -350,7 +395,13 @@ export class DigenClient {
   /** Step 3: register the uploaded S3 object as an asset on the conversation. */
   async registerUploadedAsset(
     conversationId: string,
-    opts: { url: string; assetType: string; contentType?: string; filename?: string },
+    opts: {
+      url: string;
+      assetType: string;
+      contentType?: string;
+      filename?: string;
+      metadata?: Record<string, unknown>;
+    },
   ): Promise<UploadedAsset> {
     const data = await this.json("POST", `/api/v1/conversations/${conversationId}/assets/upload`, {
       headers: { "Content-Type": "application/json" },
@@ -359,9 +410,18 @@ export class DigenClient {
         asset_type: opts.assetType,
         content_type: opts.contentType,
         filename: opts.filename,
+        ...(opts.metadata ? { metadata: opts.metadata } : {}),
       }),
     });
     return data as UploadedAsset;
+  }
+
+  async getAssetStatus(conversationId: string, assetId: string): Promise<Record<string, unknown>> {
+    const data = await this.json(
+      "GET",
+      `/api/v1/conversations/${conversationId}/assets/${assetId}/status`,
+    );
+    return data as Record<string, unknown>;
   }
 
   // ==================== Tasks ====================
@@ -371,8 +431,9 @@ export class DigenClient {
     return data as Record<string, unknown>;
   }
 
-  async listActiveTasks(): Promise<Record<string, unknown>[]> {
-    const data = await this.json("GET", "/api/v1/tasks/active");
+  async listActiveTasks(taskType?: string): Promise<Record<string, unknown>[]> {
+    const suffix = taskType ? `?task_type=${encodeURIComponent(taskType)}` : "";
+    const data = await this.json("GET", `/api/v1/tasks/active${suffix}`);
     return (data as Record<string, unknown>[]) ?? [];
   }
 

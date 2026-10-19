@@ -37,8 +37,8 @@ node dist/index.js --help
 ```
 src/
   index.ts          CLI entry point (commander setup)
-  commands/         One file per top-level command (login, chat, config, ...)
-  lib/              Config, auth, the HTTP/SSE client, and shared types
+  commands/         One file per top-level command (login, chat, upload, skill, ...)
+  lib/              Config, auth, the HTTP/SSE client, skills API/workspace helpers, shared types
   ui/
     transcript.ts   SSE event -> structured transcript reducer (shared model, no I/O)
     render.ts       Non-TTY fallback: ChatRenderer writes the transcript straight to stdout
@@ -48,7 +48,8 @@ src/
 tests/              vitest unit tests (msw for HTTP mocking)
 ```
 
-`lib/client.ts` is the only place that knows about the Digen gateway API. `ui/transcript.ts` turns
+`lib/client.ts` owns the gateway transport, and `lib/skillsApi.ts` maps the skills endpoints on top
+of it. `ui/transcript.ts` turns
 its SSE events into a plain data model with no rendering logic; both `ui/tui/` (interactive
 terminal) and `ui/render.ts` (piped/non-interactive fallback) render that model, or in
 `render.ts`'s case, drive the same event switch directly since it has no interactivity to support.

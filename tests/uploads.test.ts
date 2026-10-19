@@ -4,11 +4,14 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DigenClient, UploadPresignResponse, UploadedAsset } from "../src/lib/client.js";
 import {
+  attachmentInfoForPath,
   buildMessageBlocks,
   formatBytes,
   imageContentTypeForPath,
+  stageAttachment,
   stageImage,
   uploadImageFile,
+  waitForAssetParsing,
 } from "../src/lib/uploads.js";
 
 describe("imageContentTypeForPath", () => {
@@ -24,6 +27,55 @@ describe("imageContentTypeForPath", () => {
     expect(imageContentTypeForPath("document.pdf")).toBeNull();
     expect(imageContentTypeForPath("video.mp4")).toBeNull();
     expect(imageContentTypeForPath("noext")).toBeNull();
+  });
+});
+
+describe("attachmentInfoForPath", () => {
+  it("maps every supported media/document extension", () => {
+    expect(attachmentInfoForPath("a.mp4")).toEqual({
+      contentType: "video/mp4",
+      assetType: "video",
+    });
+    expect(attachmentInfoForPath("a.mp3")).toEqual({
+      contentType: "audio/mpeg",
+      assetType: "audio",
+    });
+    expect(attachmentInfoForPath("a.pdf")).toEqual({
+      contentType: "application/pdf",
+      assetType: "document",
+    });
+    expect(attachmentInfoForPath("a.docx")?.assetType).toBe("document");
+    expect(attachmentInfoForPath("a.exe")).toBeNull();
+  });
+});
+
+describe("stageAttachment", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "digen-upload-test-"));
+  });
+
+  it("stages video and document attachments with their block type", () => {
+    const video = join(dir, "clip.mp4");
+    const doc = join(dir, "brief.pdf");
+    writeFileSync(video, Buffer.from([1]));
+    writeFileSync(doc, Buffer.from([1]));
+    expect(stageAttachment(video)).toMatchObject({ assetType: "video", blockType: "video" });
+    expect(stageAttachment(doc)).toMatchObject({ assetType: "document", blockType: "document" });
+  });
+});
+
+describe("waitForAssetParsing", () => {
+  it("polls until parsing is complete", async () => {
+    const getAssetStatus = vi
+      .fn()
+      .mockResolvedValueOnce({ parsing_status: "pending" })
+      .mockResolvedValueOnce({ parsing_status: "completed" });
+    const client = { getAssetStatus } as unknown as DigenClient;
+    const status = await waitForAssetParsing(client, "conv_1", "upl_1", { intervalMs: 1 });
+    expect(status.parsing_status).toBe("completed");
+    expect(getAssetStatus).toHaveBeenCalledTimes(2);
   });
 });
 

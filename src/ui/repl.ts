@@ -10,7 +10,13 @@ import chalk from "chalk";
 import type { ChatBlock, DigenClient } from "../lib/client.js";
 import { ApiError } from "../lib/errors.js";
 import type { ChatEvent } from "../lib/sse.js";
-import { type StagedImage, buildMessageBlocks, formatBytes, stageImage } from "../lib/uploads.js";
+import {
+  type StagedAttachment,
+  buildMessageBlocks,
+  formatBytes,
+  stageAttachment,
+  waitForDocumentBlocks,
+} from "../lib/uploads.js";
 import { printApiError, printHelp, printHistory } from "./commandHelpers.js";
 import { ChatRenderer, type TurnOutcome } from "./render.js";
 
@@ -21,6 +27,7 @@ export interface ReplOptions {
   conversationId: string;
   workflow: string;
   images?: "auto" | "off";
+  attachments?: StagedAttachment[];
 }
 
 export async function runChatRepl(opts: ReplOptions): Promise<void> {
@@ -31,7 +38,7 @@ export async function runChatRepl(opts: ReplOptions): Promise<void> {
   const renderer = new ChatRenderer({ client, images: opts.images ?? "auto" });
   let activeController: AbortController | null = null;
   let activeTaskId: string | null = null;
-  let staged: StagedImage[] = [];
+  let staged: StagedAttachment[] = [...(opts.attachments ?? [])];
 
   const onSigint = () => {
     if (activeController) {
@@ -140,15 +147,15 @@ export async function runChatRepl(opts: ReplOptions): Promise<void> {
           }
           case "attach": {
             if (!arg) {
-              console.log(chalk.yellow("Usage: /attach <path-to-image>"));
+              console.log(chalk.yellow("Usage: /attach <path>"));
               continue;
             }
             try {
-              const image = stageImage(arg);
-              staged.push(image);
+              const attachment = stageAttachment(arg);
+              staged.push(attachment);
               console.log(
                 chalk.green(
-                  `✔ Attached ${image.name} (${formatBytes(image.size)}) — ${staged.length} image${staged.length === 1 ? "" : "s"} staged`,
+                  `✔ Attached ${attachment.name} (${formatBytes(attachment.size)}) — ${staged.length} attachment${staged.length === 1 ? "" : "s"} staged`,
                 ),
               );
             } catch (err) {
@@ -158,10 +165,12 @@ export async function runChatRepl(opts: ReplOptions): Promise<void> {
           }
           case "attachments": {
             if (staged.length === 0) {
-              console.log(chalk.dim("No images staged"));
+              console.log(chalk.dim("No attachments staged"));
             } else {
-              staged.forEach((image, i) => {
-                console.log(`  ${i + 1}. ${image.name} (${formatBytes(image.size)})`);
+              staged.forEach((attachment, i) => {
+                console.log(
+                  `  ${i + 1}. ${attachment.name} (${formatBytes(attachment.size)}, ${attachment.assetType})`,
+                );
               });
             }
             continue;
@@ -170,7 +179,7 @@ export async function runChatRepl(opts: ReplOptions): Promise<void> {
             if (!arg || arg === "all") {
               const count = staged.length;
               staged = [];
-              console.log(chalk.green(`✔ Detached ${count} image${count === 1 ? "" : "s"}`));
+              console.log(chalk.green(`✔ Detached ${count} attachment${count === 1 ? "" : "s"}`));
             } else {
               const index = Number.parseInt(arg, 10);
               if (!Number.isInteger(index) || index < 1 || index > staged.length) {
@@ -195,10 +204,11 @@ export async function runChatRepl(opts: ReplOptions): Promise<void> {
           conversationId,
           staged,
           line,
-          (image, index, total) => {
-            console.log(chalk.dim(`↑ Uploading ${image.name} (${index + 1}/${total})…`));
+          (attachment, index, total) => {
+            console.log(chalk.dim(`↑ Uploading ${attachment.name} (${index + 1}/${total})…`));
           },
         );
+        await waitForDocumentBlocks(client, conversationId, blocks);
         await sendMessage(
           client,
           conversationId,

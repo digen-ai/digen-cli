@@ -4,10 +4,11 @@ import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "re
 import type { DigenClient } from "../../lib/client.js";
 import { ApiError } from "../../lib/errors.js";
 import {
-  type StagedImage,
+  type StagedAttachment,
   buildMessageBlocks,
   formatBytes,
-  stageImage,
+  stageAttachment,
+  waitForDocumentBlocks,
 } from "../../lib/uploads.js";
 import { printApiError, printHelp, printHistory } from "../commandHelpers.js";
 import { TranscriptStore } from "../transcript.js";
@@ -19,6 +20,7 @@ export interface ChatTuiProps {
   conversationId: string;
   workflow: string;
   images?: "auto" | "off";
+  attachments?: StagedAttachment[];
 }
 
 export function ChatTui({
@@ -26,15 +28,18 @@ export function ChatTui({
   conversationId: initialConversationId,
   workflow: initialWorkflow,
   images,
+  attachments: initialAttachments,
 }: ChatTuiProps) {
   const { exit } = useApp();
   const [conversationId, setConversationId] = useState(initialConversationId);
   const [workflow, setWorkflow] = useState(initialWorkflow);
   const [inputValue, setInputValue] = useState("");
   const [busy, setBusy] = useState(false);
-  const [stagedImages, setStagedImages] = useState<StagedImage[]>([]);
-  const stagedImagesRef = useRef(stagedImages);
-  stagedImagesRef.current = stagedImages;
+  const [stagedAttachments, setStagedAttachments] = useState<StagedAttachment[]>(
+    initialAttachments ?? [],
+  );
+  const stagedAttachmentsRef = useRef(stagedAttachments);
+  stagedAttachmentsRef.current = stagedAttachments;
 
   const storeRef = useRef<TranscriptStore | null>(null);
   if (!storeRef.current) storeRef.current = new TranscriptStore({ client, images });
@@ -129,16 +134,16 @@ export function ChatTui({
           return undefined;
         case "attach": {
           if (!arg) {
-            console.log(chalk.yellow("Usage: /attach <path-to-image>"));
+            console.log(chalk.yellow("Usage: /attach <path>"));
             return undefined;
           }
           try {
-            const image = stageImage(arg);
-            const nextCount = stagedImagesRef.current.length + 1;
-            setStagedImages((prev) => [...prev, image]);
+            const attachment = stageAttachment(arg);
+            const nextCount = stagedAttachmentsRef.current.length + 1;
+            setStagedAttachments((prev) => [...prev, attachment]);
             console.log(
               chalk.green(
-                `✔ Attached ${image.name} (${formatBytes(image.size)}) — ${nextCount} image${nextCount === 1 ? "" : "s"} staged`,
+                `✔ Attached ${attachment.name} (${formatBytes(attachment.size)}) — ${nextCount} attachment${nextCount === 1 ? "" : "s"} staged`,
               ),
             );
           } catch (err) {
@@ -147,22 +152,24 @@ export function ChatTui({
           return undefined;
         }
         case "attachments": {
-          const list = stagedImagesRef.current;
+          const list = stagedAttachmentsRef.current;
           if (list.length === 0) {
-            console.log(chalk.dim("No images staged"));
+            console.log(chalk.dim("No attachments staged"));
           } else {
-            list.forEach((image, i) => {
-              console.log(`  ${i + 1}. ${image.name} (${formatBytes(image.size)})`);
+            list.forEach((attachment, i) => {
+              console.log(
+                `  ${i + 1}. ${attachment.name} (${formatBytes(attachment.size)}, ${attachment.assetType})`,
+              );
             });
           }
           return undefined;
         }
         case "detach": {
-          const list = stagedImagesRef.current;
+          const list = stagedAttachmentsRef.current;
           if (!arg || arg === "all") {
-            setStagedImages([]);
+            setStagedAttachments([]);
             console.log(
-              chalk.green(`✔ Detached ${list.length} image${list.length === 1 ? "" : "s"}`),
+              chalk.green(`✔ Detached ${list.length} attachment${list.length === 1 ? "" : "s"}`),
             );
           } else {
             const index = Number.parseInt(arg, 10);
@@ -170,7 +177,7 @@ export function ChatTui({
               console.log(chalk.yellow(`Usage: /detach [n|all] (1-${list.length || 0})`));
             } else {
               const removed = list[index - 1];
-              setStagedImages(list.filter((_, i) => i !== index - 1));
+              setStagedAttachments(list.filter((_, i) => i !== index - 1));
               console.log(chalk.green(`✔ Detached ${removed?.name}`));
             }
           }
@@ -192,9 +199,9 @@ export function ChatTui({
         return;
       }
 
-      const imagesToSend = stagedImagesRef.current;
+      const attachmentsToSend = stagedAttachmentsRef.current;
       const attachmentSuffix =
-        imagesToSend.length > 0 ? `📎 ${imagesToSend.map((i) => i.name).join(", ")}` : "";
+        attachmentsToSend.length > 0 ? `📎 ${attachmentsToSend.map((i) => i.name).join(", ")}` : "";
       store.startTurn([text, attachmentSuffix].filter(Boolean).join(" "));
       setBusy(true);
       const controller = new AbortController();
@@ -203,12 +210,13 @@ export function ChatTui({
         const blocks = await buildMessageBlocks(
           client,
           conversationIdRef.current,
-          imagesToSend,
+          attachmentsToSend,
           text,
-          (image, index, total) => {
-            console.log(chalk.dim(`↑ Uploading ${image.name} (${index + 1}/${total})…`));
+          (attachment, index, total) => {
+            console.log(chalk.dim(`↑ Uploading ${attachment.name} (${index + 1}/${total})…`));
           },
         );
+        await waitForDocumentBlocks(client, conversationIdRef.current, blocks);
         await runTurn(
           client,
           conversationIdRef.current,
@@ -220,7 +228,7 @@ export function ChatTui({
             activeTaskIdRef.current = id;
           },
         );
-        setStagedImages([]);
+        setStagedAttachments([]);
       } catch (err) {
         if (!(err instanceof Error && err.name === "AbortError")) {
           if (err instanceof ApiError) printApiError(err);
@@ -259,7 +267,7 @@ export function ChatTui({
     if (key.return) {
       const text = inputValue.trim();
       setInputValue("");
-      if (text || stagedImagesRef.current.length > 0) void submit(text);
+      if (text || stagedAttachmentsRef.current.length > 0) void submit(text);
       return;
     }
     if (key.backspace || key.delete) {
@@ -298,9 +306,9 @@ export function ChatTui({
           <TranscriptLineView key={line.id} line={line} />
         ))}
       </Box>
-      {stagedImages.length > 0 && (
+      {stagedAttachments.length > 0 && (
         <Text dimColor>
-          📎 {stagedImages.length} staged: {stagedImages.map((i) => i.name).join(", ")}
+          📎 {stagedAttachments.length} staged: {stagedAttachments.map((i) => i.name).join(", ")}
         </Text>
       )}
       <Box>

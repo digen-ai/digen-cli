@@ -4,9 +4,9 @@
 [![npm version](https://img.shields.io/npm/v/digen-cli.svg)](https://www.npmjs.com/package/digen-cli)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 
-An interactive command-line chat client for the [Digen](https://digen.ai) agent API. Log in once,
-then chat with Digen's agents straight from your terminal — streaming responses, tool calls, and
-generated assets included.
+An interactive command-line client for the [Digen](https://digen.ai) agent API. Log in once, then
+chat with Digen's agents and manage your skills from the terminal — streaming responses, tool calls,
+generated assets, file uploads, and skill authoring included.
 
 Published on npm as [`digen-cli`](https://www.npmjs.com/package/digen-cli) (`npm install -g digen-cli`).
 The commands are still `digen` and `digen-mcp`.
@@ -40,15 +40,35 @@ digen whoami                               Show the current logged-in identity
 digen config show                          Show current configuration
 digen config set-api <url>                 Set the API base URL
 digen config set-login-url <url>           Set the web login page base URL
+digen config set-user <id>                 Set your Digen user id if login omitted it
 digen config set-workflow <name>           Set the default workflow for `digen chat`
 
 digen workflows                            List available workflows
 
-digen chat [-w <workflow>] [-c <id>] [--no-images]
+digen chat [-w <workflow>] [-c <id>] [--attach <path>]... [--no-images]
                                             Start (or resume) an interactive chat session
-digen sessions                             List your conversations
-digen history <conversationId>             Print a conversation's message history
+digen sessions [--bookmarked] [--featured-status <s>]
+                                            List your conversations
+digen conversation <conversationId>        Show conversation details
+digen history <conversationId> [--limit --offset --before]
+                                            Print a conversation's message history
+digen rename <conversationId> <name>       Rename a conversation
+digen set-workflow <conversationId> <workflow>
+                                            Change a pending conversation's workflow
 digen delete <conversationId>              Delete a conversation
+
+digen upload <file...> [-c <id>] [-w <workflow>] [--wait]
+                                            Upload image/video/audio/document assets
+digen asset url <assetId...> [--providers aws] [--thumbnail]
+                                            Resolve presigned asset URLs
+digen asset status <assetId> -c <id>       Show document parsing status
+
+digen tasks [--type <type>]                List active tasks
+digen task <taskId>                        Show task details
+digen task cancel <taskId>                 Cancel a task
+digen task signal <taskId> confirm|cancel  Reply to an await_confirmation prompt
+
+digen skill <command>                      Create, validate, publish, browse, install skills
 ```
 
 ### Chatting
@@ -74,9 +94,9 @@ Slash commands available inside the chat:
 | `/sessions` | List your conversations |
 | `/history` | Print this conversation's history |
 | `/workflow [name]` | Show or change the workflow used for new conversations |
-| `/attach <path>` | Stage a local image to send with your next message |
-| `/attachments` | List staged images |
-| `/detach [n\|all]` | Remove a staged image (default: all) |
+| `/attach <path>` | Stage a local image/video/audio/document for the next message |
+| `/attachments` | List staged attachments |
+| `/detach [n\|all]` | Remove a staged attachment (default: all) |
 | `/cancel` | Cancel the currently running task |
 | `/confirm` | Confirm a pending `await_confirmation` prompt |
 | `/help` | Show this list |
@@ -96,25 +116,75 @@ Pass `--no-images` or set `DIGEN_IMAGES=off` to skip resolving assets to a presi
 entirely — you'll see the raw link the server sent instead; this happens automatically when output
 isn't a TTY (e.g. piped to a file).
 
-### Attaching images
+### Attaching files
 
 ```
 /attach ./cat.jpg
-/attach ~/Pictures/dog.png
+/attach ~/Pictures/demo.mp4
 ```
 
-`/attach <path>` stages a local image (`.jpg`, `.jpeg`, `.png`, `.gif`, or `.webp`); stage as
-many as you like, then type your message and press Enter — the staged images upload first and
-are sent alongside the text as image blocks. Sending with no text is fine if you just want to
-share the image(s). Use `/attachments` to see what's staged, and `/detach <n>` or `/detach` (no
-argument detaches everything) to remove one before sending. If an upload fails, the message isn't
-sent and the staged images are kept so you can retry.
+`/attach <path>` stages a local file; accepted types are images (`.jpg`, `.jpeg`, `.png`, `.gif`,
+`.webp`), video (`.mp4`, `.webm`), audio (`.mp3`, `.wav`, `.ogg`, `.flac`, `.m4a`), and documents
+(`.pdf`, `.docx`, `.txt`, `.md`). Stage as many as you like, then type your message and press
+Enter — the staged files upload first and are sent alongside the text as the matching content
+blocks. Sending with no text is fine if you just want to share the files. Use `/attachments` to see
+what's staged, and `/detach <n>` or `/detach` (no argument detaches everything) to remove one before
+sending. Document attachments wait for parsing to complete before the message is sent. If an upload
+fails, the message isn't sent and the staged files are kept so you can retry.
+
+You can also stage files before the first message:
+
+```bash
+digen chat --attach ./cat.jpg --attach ./brief.pdf
+```
+
+### Uploading assets without chatting
+
+```bash
+digen upload ./cat.jpg
+digen upload ./brief.pdf --wait
+digen upload ./demo.mp4 --conversation conv_abc123
+```
+
+Without `--conversation`, `digen upload` creates a pending conversation using your default workflow
+and prints its id. Each file goes through presign → S3 PUT → asset registration. `--wait` polls a
+document until parsing is `completed` or `failed`. Use `digen asset url <assetId>` to get a
+temporary access URL later.
 
 ### Resuming a conversation
 
 ```bash
 digen chat --conversation conv_abc123
 ```
+
+## Managing skills
+
+`digen` is also the user-side skill CLI (the separate `digenskill` command has been retired). All
+skill operations live under `digen skill`:
+
+| Command | Description |
+|---------|-------------|
+| `digen skill list` / `info <id\|slug>` | Browse your space / inspect a skill |
+| `digen skill init <name>` / `checkout <id>` | Create a local template / pull an existing skill |
+| `digen skill validate [path]` | Validate `SKILL.md` and references locally |
+| `digen skill push [path] [--id]` | Pack and upload (create or overwrite live content) |
+| `digen skill create` / `import` / `update` / `delete` / `export` | Direct API operations |
+| `digen skill publish` / `unpublish` / `cancel-review` / `content` | Publish lifecycle |
+| `digen skill listing <id> --file <json>` | Update listing/category/slug/locales |
+| `digen skill enable` / `disable <id>` | Personal enable/disable |
+| `digen skill market` / `categories` | Browse the marketplace |
+| `digen skill install` / `uninstall` / `fork` / `favorite` / `report` | Market actions |
+| `digen skill share` / `unshare` / `install-shared <token>` | Private sharing links |
+| `digen skill cover` / `clip <id> <file>` | Upload listing cover images / sample clips |
+| `digen skill preset upload\|bind\|remove` | Manage preset assets |
+| `digen skill kb add\|list\|remove\|entries\|query\|create\|update\|delete` | Manage a skill knowledge base |
+| `digen skill stats [id]` | Creator overview or per-skill usage |
+
+Skills are authored in `~/.digen/skills/<name>-<suffix>/` with automatic git initialization.
+Workspaces and credentials from the old Python CLI are migrated automatically: on first run,
+`~/.digen/skill.yaml` is merged into `~/.digen/cli.yaml` and kept as `skill.yaml.bak`.
+
+Use `--json` anywhere in the command line for machine-readable output.
 
 ## Use with MCP clients
 

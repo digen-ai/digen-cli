@@ -1,13 +1,12 @@
 /**
  * CLI configuration management.
  *
- * Stores settings in ~/.digen/cli.yaml. Field names mirror the Python
- * reference client (skills/cli/cli/config.py) so a user's mental model
- * transfers between tools, even though this CLI keeps its own file.
+ * Stores settings in ~/.digen/cli.yaml. Field names match the retired Python
+ * skill CLI so legacy `~/.digen/skill.yaml` files migrate cleanly.
  */
 
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import yaml from "js-yaml";
@@ -18,6 +17,8 @@ export const DEFAULT_WORKFLOW = "skill_agent";
 
 export const CONFIG_DIR = join(homedir(), ".digen");
 export const CONFIG_FILE = join(CONFIG_DIR, "cli.yaml");
+export const LEGACY_SKILL_CONFIG_FILE = join(CONFIG_DIR, "skill.yaml");
+export const SKILLS_DIR = join(CONFIG_DIR, "skills");
 export const HISTORY_FILE = join(CONFIG_DIR, "history");
 
 export interface DigenConfig {
@@ -40,14 +41,64 @@ function ensureDirs(): void {
   }
 }
 
-export function loadConfig(): DigenConfig {
-  ensureDirs();
-  if (!existsSync(CONFIG_FILE)) {
+function readConfigFile(): DigenConfig {
+  if (!existsSync(CONFIG_FILE)) return {};
+  try {
+    const parsed = yaml.load(readFileSync(CONFIG_FILE, "utf-8"));
+    return (parsed as DigenConfig) ?? {};
+  } catch {
     return {};
   }
-  const raw = readFileSync(CONFIG_FILE, "utf-8");
-  const parsed = yaml.load(raw);
-  return (parsed as DigenConfig) ?? {};
+}
+
+/**
+ * Merge the legacy `~/.digen/skill.yaml` (written by the retired Python
+ * `digenskill` CLI) into `cli.yaml`. Missing fields are filled; an existing
+ * token is never overwritten. The legacy file is kept as `skill.yaml.bak`.
+ */
+function migrateLegacyConfig(cfg: DigenConfig): DigenConfig {
+  if (!existsSync(LEGACY_SKILL_CONFIG_FILE)) return cfg;
+  let legacy: DigenConfig;
+  try {
+    legacy = (yaml.load(readFileSync(LEGACY_SKILL_CONFIG_FILE, "utf-8")) as DigenConfig) ?? {};
+  } catch {
+    return cfg;
+  }
+  let changed = false;
+  const copyKeys: Array<keyof DigenConfig> = [
+    "api_url",
+    "login_url",
+    "token",
+    "user_id",
+    "session_id",
+    "token_expires_at",
+    "name",
+    "email",
+    "language",
+  ];
+  for (const key of copyKeys) {
+    if (cfg[key] === undefined && legacy[key] !== undefined) {
+      cfg[key] = legacy[key];
+      changed = true;
+    }
+  }
+  if (changed) {
+    writeFileSync(CONFIG_FILE, yaml.dump(cfg, { lineWidth: -1 }), "utf-8");
+    process.stderr.write(
+      "digen: migrated credentials from ~/.digen/skill.yaml (backup: skill.yaml.bak)\n",
+    );
+  }
+  try {
+    renameSync(LEGACY_SKILL_CONFIG_FILE, `${LEGACY_SKILL_CONFIG_FILE}.bak`);
+  } catch {
+    // Leave the legacy file alone if it cannot be renamed.
+  }
+  return cfg;
+}
+
+export function loadConfig(): DigenConfig {
+  ensureDirs();
+  return migrateLegacyConfig(readConfigFile());
 }
 
 export function saveConfig(cfg: DigenConfig): void {

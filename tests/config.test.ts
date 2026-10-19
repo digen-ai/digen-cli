@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -54,6 +54,44 @@ describe("config", () => {
     expect(cfg.token).toBeUndefined();
     expect(cfg.user_id).toBeUndefined();
     expect(cfg.api_url).toBe("https://custom.example.com");
+  });
+
+  it("migrates legacy ~/.digen/skill.yaml credentials and keeps a backup", async () => {
+    const configDir = join(tempHome, ".digen");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "skill.yaml"),
+      [
+        "api_url: https://legacy.example.com",
+        "login_url: https://legacy-login.example.com",
+        "token: legacy-token",
+        "user_id: 42",
+        "session_id: legacy-session",
+        "name: Legacy User",
+        "email: legacy@example.com",
+        "language: zh",
+      ].join("\n"),
+    );
+
+    const config = await import("../src/lib/config.js");
+    expect(config.getToken()).toBe("legacy-token");
+    expect(config.getUserId()).toBe(42);
+    expect(config.getApiUrl()).toBe("https://legacy.example.com");
+    expect(config.getLanguage()).toBe("zh");
+    expect(existsSync(join(configDir, "skill.yaml"))).toBe(false);
+    expect(existsSync(join(configDir, "skill.yaml.bak"))).toBe(true);
+  });
+
+  it("does not overwrite an existing cli.yaml token during migration", async () => {
+    const configDir = join(tempHome, ".digen");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, "cli.yaml"), "token: current-token\nuser_id: 1\n");
+    writeFileSync(join(configDir, "skill.yaml"), "token: legacy-token\nuser_id: 42\n");
+
+    const config = await import("../src/lib/config.js");
+    expect(config.getToken()).toBe("current-token");
+    expect(config.getUserId()).toBe(1);
+    expect(existsSync(join(configDir, "skill.yaml.bak"))).toBe(true);
   });
 
   it("ensureSessionId creates and persists a stable id", async () => {

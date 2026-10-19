@@ -229,6 +229,25 @@ describe("DigenClient", () => {
     expect(seenHeaders?.get("digen-sessionid")).toBeNull();
   });
 
+  it("omits x-amz-acl for CDN buckets (ACL-disabled) when requested", async () => {
+    let seenHeaders: Headers | undefined;
+    server.use(
+      http.put("https://cdn.example.test/cover.jpg", ({ request }) => {
+        seenHeaders = request.headers;
+        return new HttpResponse(null, { status: 200 });
+      }),
+    );
+    const client = makeClient();
+    await client.uploadToPresignedUrl(
+      "https://cdn.example.test/cover.jpg",
+      Buffer.from([1]),
+      "image/jpeg",
+      { acl: null },
+    );
+    expect(seenHeaders?.get("content-type")).toBe("image/jpeg");
+    expect(seenHeaders?.get("x-amz-acl")).toBeNull();
+  });
+
   it("throws an ApiError when the S3 PUT is rejected", async () => {
     server.use(
       http.put(

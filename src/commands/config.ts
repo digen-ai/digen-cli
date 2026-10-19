@@ -1,11 +1,12 @@
 import chalk from "chalk";
 import type { Command } from "commander";
-import { GATEWAY_PREFIX } from "../lib/client.js";
+import { GATEWAY_PREFIX, SKILLS_API_PATH } from "../lib/client.js";
 import {
   CONFIG_FILE,
   DEFAULT_API_URL,
   DEFAULT_LOGIN_URL,
   DEFAULT_WORKFLOW,
+  SKILLS_DIR,
   loadConfig,
   saveConfig,
 } from "../lib/config.js";
@@ -29,6 +30,23 @@ export function registerConfigCommands(program: Command): void {
       cfg.api_url = url;
       saveConfig(cfg);
       console.log(chalk.green(`✔ API URL set to ${url}`));
+    });
+
+  config
+    .command("set-user")
+    .description("Set your Digen user id (used in the digen-token header)")
+    .argument("<id>", "Digen user id")
+    .action((id: string) => {
+      const userId = Number.parseInt(id, 10);
+      if (!Number.isInteger(userId)) {
+        console.error(chalk.red("user id must be an integer"));
+        process.exitCode = 1;
+        return;
+      }
+      const cfg = loadConfig();
+      cfg.user_id = userId;
+      saveConfig(cfg);
+      console.log(chalk.green(`✔ user_id set to ${userId}`));
     });
 
   config
@@ -62,6 +80,7 @@ export function registerConfigCommands(program: Command): void {
       console.log(`API URL:          ${chalk.cyan(apiUrl)}`);
       console.log(`Login URL:        ${chalk.cyan(cfg.login_url ?? DEFAULT_LOGIN_URL)}`);
       console.log(`Chat API:         ${chalk.cyan(apiUrl + GATEWAY_PREFIX)}`);
+      console.log(`Skills API:       ${chalk.cyan(apiUrl + GATEWAY_PREFIX + SKILLS_API_PATH)}`);
       console.log(`Default workflow: ${chalk.cyan(cfg.default_workflow ?? DEFAULT_WORKFLOW)}`);
       console.log(`Token:            ${chalk.dim(maskSecret(cfg.token))}`);
       console.log(`Session:          ${chalk.dim(maskSecret(cfg.session_id))}`);
@@ -69,6 +88,7 @@ export function registerConfigCommands(program: Command): void {
       console.log(`Language:         ${chalk.dim(cfg.language ?? "en")}`);
       console.log(`Name:             ${chalk.dim(cfg.name ?? "(not set)")}`);
       console.log(`Email:            ${chalk.dim(cfg.email ?? "(not set)")}`);
+      console.log(`Skills workspace: ${chalk.dim(SKILLS_DIR)}`);
       console.log(`Config file:      ${chalk.dim(CONFIG_FILE)}`);
     });
 }
