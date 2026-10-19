@@ -1,6 +1,6 @@
 {
   "name": "digen-cli",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Interactive command-line client for the Digen agent API and user skills",
   "type": "module",
   "license": "Apache-2.0",
@@ -12,7 +12,9 @@
     "digen-cli": "dist/index.js",
     "digen-mcp": "dist/mcp.js"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": "./dist/index.js",
     "./mcp": "./dist/mcp.js"
@@ -62,5 +64,14 @@
     "type": "git",
     "url": "https://github.com/digen-ai/digen-cli.git"
   },
-  "keywords": ["digen", "cli", "chat", "agent", "ai", "upload", "skills", "mcp"]
+  "keywords": [
+    "digen",
+    "cli",
+    "chat",
+    "agent",
+    "ai",
+    "upload",
+    "skills",
+    "mcp"
+  ]
 }
