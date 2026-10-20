@@ -238,7 +238,7 @@ function ensureLoggedIn(): void {
 
 async function main(): Promise<void> {
   ensureLoggedIn();
-  const client = getClient();
+  const client = getClient("mcp");
   const registry = new TaskRegistry(client);
 
   const server = new McpServer({ name: "digen", version: "0.1.0" });

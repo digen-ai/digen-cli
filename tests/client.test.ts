@@ -34,13 +34,19 @@ describe("DigenClient", () => {
     expect(workflows).toEqual([{ name: "skill_agent" }]);
     expect(seenHeaders?.get("digen-token")).toMatch(/^tok_abc:7:\d+$/);
     expect(seenHeaders?.get("digen-sessionid")).toBe("sess_1");
+    expect(seenHeaders?.get("digen-platform")).toBe("cli");
   });
 
-  it("creates a conversation with the workflow query param", async () => {
+  it("creates a conversation with the workflow query param and platform fields", async () => {
+    let seenHeaders: Headers | undefined;
     server.use(
-      http.post(`${BASE_URL}${GATEWAY_PREFIX}/api/v1/conversations`, ({ request }) => {
+      http.post(`${BASE_URL}${GATEWAY_PREFIX}/api/v1/conversations`, async ({ request }) => {
+        seenHeaders = request.headers;
         const url = new URL(request.url);
         expect(url.searchParams.get("workflow")).toBe("skill_agent");
+        expect(await request.json()).toEqual({
+          client_env: { language: "zh-CN", platform: "cli" },
+        });
         return HttpResponse.json(
           { conversation_id: "conv_1", workflow: "skill_agent", status: "pending" },
           { status: 201 },
@@ -48,8 +54,26 @@ describe("DigenClient", () => {
       }),
     );
     const client = makeClient();
-    const conv = await client.createConversation("skill_agent");
+    const conv = await client.createConversation("skill_agent", { language: "zh-CN" });
     expect(conv.conversation_id).toBe("conv_1");
+    expect(seenHeaders?.get("digen-platform")).toBe("cli");
+  });
+
+  it("uses a custom platform in both the header and client_env", async () => {
+    let seenHeaders: Headers | undefined;
+    server.use(
+      http.post(`${BASE_URL}${GATEWAY_PREFIX}/api/v1/conversations`, async ({ request }) => {
+        seenHeaders = request.headers;
+        expect(await request.json()).toEqual({ client_env: { platform: "mcp" } });
+        return HttpResponse.json(
+          { conversation_id: "conv_2", workflow: "skill_agent", status: "pending" },
+          { status: 201 },
+        );
+      }),
+    );
+    const client = new DigenClient({ apiUrl: BASE_URL, platform: "mcp" });
+    await client.createConversation("skill_agent");
+    expect(seenHeaders?.get("digen-platform")).toBe("mcp");
   });
 
   it("throws ApiError with structured detail on CONVERSATION_BUSY (409)", async () => {
