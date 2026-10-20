@@ -4,7 +4,7 @@
  */
 
 import chalk from "chalk";
-import { DigenClient } from "./client.js";
+import { DEFAULT_PLATFORM, DigenClient, type DigenPlatform } from "./client.js";
 import {
   ensureSessionId,
   getApiUrl,
@@ -21,7 +21,7 @@ export function getSkillsApi(): SkillsApi {
   return new SkillsApi(getClient());
 }
 
-export function getClient(): DigenClient {
+export function getClient(platform: DigenPlatform = DEFAULT_PLATFORM): DigenClient {
   return new DigenClient({
     apiUrl: getApiUrl(),
     token: getToken(),
@@ -30,6 +30,7 @@ export function getClient(): DigenClient {
     language: getLanguage(),
     tokenExpiresAt: getTokenExpiresAt(),
     referer: getLoginUrl(),
+    platform,
   });
 }
 

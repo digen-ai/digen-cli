@@ -15,6 +15,14 @@ import { composeDigenToken } from "./token.js";
 export const GATEWAY_PREFIX = "/v2/gateway/agent";
 export const SKILLS_API_PATH = "/api/v1/skills";
 
+/**
+ * Request-origin values accepted by the API's `Digen-Platform` header
+ * (see vid-agent `docs/API_REFERENCE.md`, "来源标识").
+ */
+export type DigenPlatform = "ios" | "android" | "web" | "cli" | "mcp";
+
+export const DEFAULT_PLATFORM: DigenPlatform = "cli";
+
 export type BlockType =
   | "text"
   | "image"
@@ -95,6 +103,7 @@ export interface DigenClientOptions {
   language?: string;
   tokenExpiresAt?: number;
   referer?: string;
+  platform?: DigenPlatform;
   fetchImpl?: typeof fetch;
 }
 
@@ -102,13 +111,16 @@ export class DigenClient {
   private baseUrl: string;
   private headers: Record<string, string>;
   private fetchImpl: typeof fetch;
+  private platform: DigenPlatform;
 
   constructor(opts: DigenClientOptions) {
     this.baseUrl = opts.apiUrl.replace(/\/+$/, "");
     this.fetchImpl = opts.fetchImpl ?? fetch;
+    this.platform = opts.platform ?? DEFAULT_PLATFORM;
     this.headers = {
       Accept: "application/json, text/plain, */*",
       "digen-language": opts.language || "en",
+      "Digen-Platform": this.platform,
     };
     if (opts.token) {
       this.headers["digen-token"] = composeDigenToken(opts.token, opts.userId, opts.tokenExpiresAt);
@@ -226,12 +238,16 @@ export class DigenClient {
     workflow: string,
     clientEnv?: Record<string, unknown>,
   ): Promise<ConversationSummary> {
+    // The API also accepts the origin in `client_env.platform` (older clients
+    // and the web UI use it); keep it in sync with the request header so the
+    // conversation is attributed even if the header is dropped by a proxy.
+    const env = { ...(clientEnv ?? {}), platform: this.platform };
     const data = await this.json(
       "POST",
       `/api/v1/conversations?${new URLSearchParams({ workflow }).toString()}`,
       {
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(clientEnv ? { client_env: clientEnv } : {}),
+        body: JSON.stringify({ client_env: env }),
       },
     );
     return data as ConversationSummary;
