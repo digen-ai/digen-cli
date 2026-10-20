@@ -1,5 +1,19 @@
 # digen-cli
 
+## 0.3.0
+
+### Minor Changes
+
+- 27100ce: Add upload/asset/task commands, generic chat attachments, and merge the retired Python
+  `digenskill` CLI into `digen skill` (authoring, publish lifecycle, marketplace, preset assets,
+  knowledge base, sharing, and creator stats). Legacy `~/.digen/skill.yaml` credentials migrate to
+  `~/.digen/cli.yaml` automatically.
+
+### Patch Changes
+
+- 053ccd6: Send the `Digen-Platform` header (`cli` for the CLI, `mcp` for the MCP server) and include
+  `platform` in `client_env` when creating conversations, matching the vid-agent API convention.
+
 ## 0.2.0
 
 ### Minor Changes
