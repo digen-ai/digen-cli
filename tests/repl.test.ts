@@ -53,6 +53,7 @@ describe("runChatRepl opening message", () => {
     await vi.waitFor(() => {
       expect(chatStream).toHaveBeenCalledTimes(1);
     });
+    await new Promise((resolve) => setImmediate(resolve));
     input.write("第二句\n");
     await vi.waitFor(() => {
       expect(chatStream).toHaveBeenCalledTimes(2);

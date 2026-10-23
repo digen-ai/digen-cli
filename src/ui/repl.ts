@@ -49,7 +49,18 @@ export async function runChatRepl(opts: ReplOptions): Promise<void> {
   let { conversationId, workflow } = opts;
   const { client } = opts;
 
-  const rl = createInterface({ input: opts.input ?? process.stdin, output: process.stdout });
+  const input = opts.input ?? process.stdin;
+  // Default terminal detection follows stdout. A piped stdin with a TTY stdout
+  // would then ignore EOF, so key off the input stream instead.
+  const rl = createInterface({
+    input,
+    output: process.stdout,
+    terminal: Boolean((input as NodeJS.ReadStream).isTTY),
+  });
+  let inputClosed = false;
+  rl.on("close", () => {
+    inputClosed = true;
+  });
   const renderer = new ChatRenderer({ client, images: opts.images ?? "auto" });
   const skillInvoker = new SkillInvoker(client);
   let activeController: AbortController | null = null;
@@ -274,6 +285,19 @@ export async function runChatRepl(opts: ReplOptions): Promise<void> {
     return true;
   };
 
+  /** `question()` stays pending after the interface closes unless aborted. */
+  async function readPrompt(): Promise<string> {
+    if (inputClosed) throw new Error("readline closed");
+    const ac = new AbortController();
+    const onClose = () => ac.abort();
+    rl.once("close", onClose);
+    try {
+      return await rl.question(chalk.cyan("> "), { signal: ac.signal });
+    } finally {
+      rl.off("close", onClose);
+    }
+  }
+
   try {
     const opening = opts.message?.trim();
     if (opening) {
@@ -285,7 +309,7 @@ export async function runChatRepl(opts: ReplOptions): Promise<void> {
     while (true) {
       let line: string;
       try {
-        line = (await rl.question(chalk.cyan("> "))).trim();
+        line = (await readPrompt()).trim();
       } catch {
         break; // stdin closed (Ctrl-D)
       }
