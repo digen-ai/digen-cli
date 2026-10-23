@@ -1,5 +1,25 @@
 # digen-cli
 
+## 0.3.0
+
+### Minor Changes
+
+- 27100ce: Add upload/asset/task commands, generic chat attachments, and merge the retired Python
+  `digenskill` CLI into `digen skill` (authoring, publish lifecycle, marketplace, preset assets,
+  knowledge base, sharing, and creator stats). Legacy `~/.digen/skill.yaml` credentials migrate to
+  `~/.digen/cli.yaml` automatically.
+- a8071ff: `digen chat` now supports explicit skill invocation: type `/<name>` anywhere in a message to send a
+  `type: "skill"` block alongside the unchanged text (up to 3 per message, order-preserving and
+  de-duplicated). Add `/skills [--refresh]` to list invokable skills. Names are matched against the
+  skill's runtime `name` (not its market slug), and a leading unknown `/name` is still reported as an
+  unknown command rather than sent.
+
+### Patch Changes
+
+- 7976caf: `digen --version` and the MCP server now report the installed package version.
+- 053ccd6: Send the `Digen-Platform` header (`cli` for the CLI, `mcp` for the MCP server) and include
+  `platform` in `client_env` when creating conversations, matching the vid-agent API convention.
+
 ## 0.2.0
 
 ### Minor Changes
