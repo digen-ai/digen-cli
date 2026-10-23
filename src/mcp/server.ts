@@ -24,6 +24,7 @@ import { pickUrl } from "../lib/assets.js";
 import type { DigenClient } from "../lib/client.js";
 import { getDefaultWorkflow, loadConfig } from "../lib/config.js";
 import { ApiError } from "../lib/errors.js";
+import { packageVersion } from "../lib/packageVersion.js";
 import { getClient } from "../lib/session.js";
 import type { AggregatedAsset } from "./aggregate.js";
 import { TaskRegistry } from "./tasks.js";
@@ -241,7 +242,7 @@ async function main(): Promise<void> {
   const client = getClient("mcp");
   const registry = new TaskRegistry(client);
 
-  const server = new McpServer({ name: "digen", version: "0.1.0" });
+  const server = new McpServer({ name: "digen", version: packageVersion() });
   registerTools(server, client, registry);
 
   const transport = new StdioServerTransport();

@@ -5,6 +5,7 @@ import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { DigenClient, GATEWAY_PREFIX } from "../src/lib/client.js";
+import { packageVersion } from "../src/lib/packageVersion.js";
 import { isDirectRun, registerTools } from "../src/mcp/server.js";
 import { TaskRegistry } from "../src/mcp/tasks.js";
 
@@ -21,7 +22,7 @@ function makeClient(): DigenClient {
 }
 
 async function connectedMcpClient(digenClient: DigenClient): Promise<Client> {
-  const mcpServer = new McpServer({ name: "digen", version: "0.1.0" });
+  const mcpServer = new McpServer({ name: "digen", version: packageVersion() });
   registerTools(mcpServer, digenClient, new TaskRegistry(digenClient));
 
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();

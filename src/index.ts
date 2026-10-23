@@ -8,6 +8,7 @@ import { registerSkillCommand } from "./commands/skill.js";
 import { registerTaskCommands } from "./commands/tasks.js";
 import { registerUploadCommand } from "./commands/upload.js";
 import { registerWorkflowsCommand } from "./commands/workflows.js";
+import { packageVersion } from "./lib/packageVersion.js";
 
 const program = new Command();
 
@@ -15,7 +16,7 @@ program
   .name("digen")
   .description("Interactive command-line chat client for the Digen agent API")
   .option("--json", "Print machine-readable JSON output where applicable")
-  .version("0.1.0");
+  .version(packageVersion());
 
 registerAuthCommands(program);
 registerConfigCommands(program);
