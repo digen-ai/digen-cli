@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import { Box, Static, Text, useApp, useInput } from "ink";
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { DigenClient } from "../../lib/client.js";
 import { ApiError } from "../../lib/errors.js";
 import {
@@ -32,6 +32,8 @@ export interface ChatTuiProps {
   workflow: string;
   images?: "auto" | "off";
   attachments?: StagedAttachment[];
+  /** Sent as the first turn once the TUI is up; the prompt stays open afterward. */
+  message?: string;
 }
 
 export function ChatTui({
@@ -40,6 +42,7 @@ export function ChatTui({
   workflow: initialWorkflow,
   images,
   attachments: initialAttachments,
+  message: openingMessage,
 }: ChatTuiProps) {
   const { exit } = useApp();
   const [conversationId, setConversationId] = useState(initialConversationId);
@@ -290,6 +293,14 @@ export function ChatTui({
     },
     [client, runSlashCommand, store, exit, skillInvoker],
   );
+
+  const sentOpeningRef = useRef(false);
+  useEffect(() => {
+    const text = openingMessage?.trim() ?? "";
+    if (!text || sentOpeningRef.current) return;
+    sentOpeningRef.current = true;
+    void submit(text);
+  }, [openingMessage, submit]);
 
   useInput((input, key) => {
     if (input === "c" && key.ctrl) {

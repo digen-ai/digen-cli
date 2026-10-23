@@ -11,6 +11,10 @@ export function registerChatCommand(program: Command): void {
   program
     .command("chat")
     .description("Start an interactive chat session")
+    .argument(
+      "[message...]",
+      "Opening message sent as the first turn; the session stays open afterward",
+    )
     .option("-w, --workflow <name>", "Workflow to use (default: configured default_workflow)")
     .option("-c, --conversation <id>", "Resume an existing conversation")
     .option("--no-images", "Show raw asset links as-is instead of resolving them to presigned URLs")
@@ -21,12 +25,16 @@ export function registerChatCommand(program: Command): void {
       [] as string[],
     )
     .action(
-      async (opts: {
-        workflow?: string;
-        conversation?: string;
-        images?: boolean;
-        attach: string[];
-      }) => {
+      async (
+        message: string[],
+        opts: {
+          workflow?: string;
+          conversation?: string;
+          images?: boolean;
+          attach: string[];
+        },
+      ) => {
+        const opening = message.join(" ").trim();
         if (!requireLogin()) {
           process.exitCode = 1;
           return;
@@ -73,6 +81,7 @@ export function registerChatCommand(program: Command): void {
             workflow: resolvedWorkflow,
             images,
             attachments,
+            message: opening || undefined,
           });
         } else {
           await runChatRepl({
@@ -81,6 +90,7 @@ export function registerChatCommand(program: Command): void {
             workflow: resolvedWorkflow,
             images,
             attachments,
+            message: opening || undefined,
           });
         }
       },

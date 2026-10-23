@@ -45,8 +45,8 @@ digen config set-workflow <name>           Set the default workflow for `digen c
 
 digen workflows                            List available workflows
 
-digen chat [-w <workflow>] [-c <id>] [--attach <path>]... [--no-images]
-                                            Start (or resume) an interactive chat session
+digen chat [message...] [-w <workflow>] [-c <id>] [--attach <path>]... [--no-images]
+                                            Start (or resume) a chat; optional text is sent as the first turn
 digen sessions [--bookmarked] [--featured-status <s>]
                                             List your conversations
 digen conversation <conversationId>        Show conversation details
@@ -75,11 +75,19 @@ digen skill <command>                      Create, validate, publish, browse, in
 
 ```bash
 digen chat
+digen chat 帮我做一张发布会海报
+digen chat --attach ./brief.pdf 根据这份简报做一页总结
 ```
 
 Starts a new conversation using your configured default workflow (`skill_agent` unless changed via
 `digen config set-workflow`). Type a message and press Enter; responses stream in as they're
 generated, including tool calls, sub-agent activity, and generated assets.
+
+Any words after `digen chat` are joined into an opening message and sent as the first turn. The
+session stays open, so you can keep chatting. Quote the text if it starts with `-`
+(`digen chat -- -like this`). In a real terminal this is interactive; if stdin is not a terminal,
+the process still exits once stdin closes, so `digen chat "hello" </dev/null` sends that one turn
+and quits.
 
 When both stdin and stdout are a real terminal, `digen chat` runs as an Ink-based TUI. Otherwise
 (piped output, non-interactive shells, SSH without a pty) it falls back to a plain line-based REPL
@@ -153,10 +161,11 @@ what's staged, and `/detach <n>` or `/detach` (no argument detaches everything) 
 sending. Document attachments wait for parsing to complete before the message is sent. If an upload
 fails, the message isn't sent and the staged files are kept so you can retry.
 
-You can also stage files before the first message:
+You can also stage files before the first message, and optionally send the opening text with them:
 
 ```bash
 digen chat --attach ./cat.jpg --attach ./brief.pdf
+digen chat --attach ./cat.jpg 描述这张图
 ```
 
 ### Uploading assets without chatting

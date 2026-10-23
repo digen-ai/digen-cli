@@ -39,13 +39,17 @@ export interface ReplOptions {
   workflow: string;
   images?: "auto" | "off";
   attachments?: StagedAttachment[];
+  /** Sent as the first turn before the prompt; the session stays open afterward. */
+  message?: string;
+  /** Defaults to `process.stdin`. Tests pass a stream that can be closed. */
+  input?: NodeJS.ReadableStream;
 }
 
 export async function runChatRepl(opts: ReplOptions): Promise<void> {
   let { conversationId, workflow } = opts;
   const { client } = opts;
 
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const rl = createInterface({ input: opts.input ?? process.stdin, output: process.stdout });
   const renderer = new ChatRenderer({ client, images: opts.images ?? "auto" });
   const skillInvoker = new SkillInvoker(client);
   let activeController: AbortController | null = null;
@@ -76,7 +80,208 @@ export async function runChatRepl(opts: ReplOptions): Promise<void> {
     chalk.dim("Type your message and press Enter. /help for commands, Ctrl-C to cancel/quit.\n"),
   );
 
+  /** Returns false when the session should end (`/quit`, `/exit`). */
+  const dispatchLine = async (line: string): Promise<boolean> => {
+    const command = parseChatSlashCommand(line);
+    if (command) {
+      const { cmd, arg } = command;
+      switch (cmd) {
+        case "quit":
+        case "exit":
+          return false;
+        case "help":
+          printHelp();
+          return true;
+        case "new": {
+          const conv = await client.createConversation(workflow);
+          conversationId = conv.conversation_id;
+          console.log(chalk.green(`✔ New conversation ${conversationId}`));
+          return true;
+        }
+        case "switch": {
+          if (!arg) {
+            console.log(chalk.yellow("Usage: /switch <conversationId>"));
+            return true;
+          }
+          try {
+            const conv = await client.getConversation(arg);
+            conversationId = arg;
+            workflow = (conv.workflow as string | undefined) ?? workflow;
+            console.log(chalk.green(`✔ Switched to ${conversationId} (${workflow})`));
+          } catch (err) {
+            console.log(chalk.red(err instanceof ApiError ? err.detail : String(err)));
+          }
+          return true;
+        }
+        case "sessions": {
+          const conversations = await client.listConversations();
+          for (const conv of conversations) {
+            console.log(
+              `${conv.conversation_id}  ${chalk.cyan(conv.workflow)}  ${conv.name ?? ""}`,
+            );
+          }
+          return true;
+        }
+        case "history": {
+          await printHistory(client, conversationId);
+          return true;
+        }
+        case "workflow": {
+          if (arg) {
+            workflow = arg;
+            console.log(chalk.green(`✔ Workflow for new messages set to ${workflow}`));
+          } else {
+            console.log(`Current workflow: ${chalk.cyan(workflow)}`);
+          }
+          return true;
+        }
+        case "skills": {
+          try {
+            printSkillList(
+              await skillInvoker.list({ refresh: arg === "refresh" || arg === "--refresh" }),
+            );
+          } catch (err) {
+            console.log(chalk.red(err instanceof ApiError ? err.detail : String(err)));
+          }
+          return true;
+        }
+        case "cancel": {
+          if (activeTaskId) {
+            await client.cancelTask(activeTaskId).catch(() => {});
+            console.log(chalk.yellow("✔ Cancel requested"));
+          } else {
+            console.log(chalk.dim("No task is running"));
+          }
+          return true;
+        }
+        case "confirm": {
+          if (activeTaskId) {
+            await client.confirmCountdown(activeTaskId, "confirm").catch(() => {});
+          } else {
+            console.log(chalk.dim("No task is awaiting confirmation"));
+          }
+          return true;
+        }
+        case "attach": {
+          if (!arg) {
+            console.log(chalk.yellow("Usage: /attach <path>"));
+            return true;
+          }
+          try {
+            const attachment = stageAttachment(arg);
+            staged.push(attachment);
+            console.log(
+              chalk.green(
+                `✔ Attached ${attachment.name} (${formatBytes(attachment.size)}) — ${staged.length} attachment${staged.length === 1 ? "" : "s"} staged`,
+              ),
+            );
+          } catch (err) {
+            console.log(chalk.red(err instanceof Error ? err.message : String(err)));
+          }
+          return true;
+        }
+        case "attachments": {
+          if (staged.length === 0) {
+            console.log(chalk.dim("No attachments staged"));
+          } else {
+            staged.forEach((attachment, i) => {
+              console.log(
+                `  ${i + 1}. ${attachment.name} (${formatBytes(attachment.size)}, ${attachment.assetType})`,
+              );
+            });
+          }
+          return true;
+        }
+        case "detach": {
+          if (!arg || arg === "all") {
+            const count = staged.length;
+            staged = [];
+            console.log(chalk.green(`✔ Detached ${count} attachment${count === 1 ? "" : "s"}`));
+          } else {
+            const index = Number.parseInt(arg, 10);
+            if (!Number.isInteger(index) || index < 1 || index > staged.length) {
+              console.log(chalk.yellow(`Usage: /detach [n|all] (1-${staged.length || 0})`));
+            } else {
+              const [removed] = staged.splice(index - 1, 1);
+              console.log(chalk.green(`✔ Detached ${removed?.name}`));
+            }
+          }
+          return true;
+        }
+        default:
+          return true;
+      }
+    }
+
+    let invocation: ResolvedSkillInvocation;
+    try {
+      invocation = await skillInvoker.resolve(line);
+    } catch (err) {
+      console.log(chalk.red(err instanceof ApiError ? err.detail : String(err)));
+      return true;
+    }
+    if (line.startsWith("/") && invocation.invoked.length === 0) {
+      const leading = leadingSkillToken(line);
+      if (leading && invocation.disabled.includes(leading)) {
+        console.log(
+          chalk.yellow(
+            `Skill /${leading} is disabled. Re-enable it with \`digen skill enable <id>\`.`,
+          ),
+        );
+      } else {
+        const [cmd] = line.slice(1).split(/\s+/);
+        console.log(chalk.yellow(`Unknown command or skill: /${cmd} (try /help or /skills)`));
+      }
+      return true;
+    }
+
+    activeController = new AbortController();
+    try {
+      const blocks = await buildMessageBlocks(
+        client,
+        conversationId,
+        staged,
+        line,
+        (attachment, index, total) => {
+          console.log(chalk.dim(`↑ Uploading ${attachment.name} (${index + 1}/${total})…`));
+        },
+        invocation.blocks,
+      );
+      await waitForDocumentBlocks(client, conversationId, blocks);
+      await sendMessage(
+        client,
+        conversationId,
+        workflow,
+        blocks,
+        renderer,
+        activeController.signal,
+        (id) => {
+          activeTaskId = id;
+        },
+      );
+      staged = [];
+    } catch (err) {
+      renderer.finishLine();
+      if (err instanceof ApiError) {
+        printApiError(err);
+      } else if (!(err instanceof Error && err.name === "AbortError")) {
+        console.error(chalk.red(String(err)));
+      }
+    } finally {
+      activeController = null;
+      activeTaskId = null;
+    }
+    return true;
+  };
+
   try {
+    const opening = opts.message?.trim();
+    if (opening) {
+      console.log(`${chalk.cyan("> ")}${opening}`);
+      const keepGoing = await dispatchLine(opening);
+      if (!keepGoing) return;
+    }
+
     while (true) {
       let line: string;
       try {
@@ -85,197 +290,8 @@ export async function runChatRepl(opts: ReplOptions): Promise<void> {
         break; // stdin closed (Ctrl-D)
       }
       if (!line && staged.length === 0) continue;
-
-      const command = parseChatSlashCommand(line);
-      if (command) {
-        const { cmd, arg } = command;
-        switch (cmd) {
-          case "quit":
-          case "exit":
-            rl.close();
-            return;
-          case "help":
-            printHelp();
-            continue;
-          case "new": {
-            const conv = await client.createConversation(workflow);
-            conversationId = conv.conversation_id;
-            console.log(chalk.green(`✔ New conversation ${conversationId}`));
-            continue;
-          }
-          case "switch": {
-            if (!arg) {
-              console.log(chalk.yellow("Usage: /switch <conversationId>"));
-              continue;
-            }
-            try {
-              const conv = await client.getConversation(arg);
-              conversationId = arg;
-              workflow = (conv.workflow as string | undefined) ?? workflow;
-              console.log(chalk.green(`✔ Switched to ${conversationId} (${workflow})`));
-            } catch (err) {
-              console.log(chalk.red(err instanceof ApiError ? err.detail : String(err)));
-            }
-            continue;
-          }
-          case "sessions": {
-            const conversations = await client.listConversations();
-            for (const conv of conversations) {
-              console.log(
-                `${conv.conversation_id}  ${chalk.cyan(conv.workflow)}  ${conv.name ?? ""}`,
-              );
-            }
-            continue;
-          }
-          case "history": {
-            await printHistory(client, conversationId);
-            continue;
-          }
-          case "workflow": {
-            if (arg) {
-              workflow = arg;
-              console.log(chalk.green(`✔ Workflow for new messages set to ${workflow}`));
-            } else {
-              console.log(`Current workflow: ${chalk.cyan(workflow)}`);
-            }
-            continue;
-          }
-          case "skills": {
-            try {
-              printSkillList(
-                await skillInvoker.list({ refresh: arg === "refresh" || arg === "--refresh" }),
-              );
-            } catch (err) {
-              console.log(chalk.red(err instanceof ApiError ? err.detail : String(err)));
-            }
-            continue;
-          }
-          case "cancel": {
-            if (activeTaskId) {
-              await client.cancelTask(activeTaskId).catch(() => {});
-              console.log(chalk.yellow("✔ Cancel requested"));
-            } else {
-              console.log(chalk.dim("No task is running"));
-            }
-            continue;
-          }
-          case "confirm": {
-            if (activeTaskId) {
-              await client.confirmCountdown(activeTaskId, "confirm").catch(() => {});
-            } else {
-              console.log(chalk.dim("No task is awaiting confirmation"));
-            }
-            continue;
-          }
-          case "attach": {
-            if (!arg) {
-              console.log(chalk.yellow("Usage: /attach <path>"));
-              continue;
-            }
-            try {
-              const attachment = stageAttachment(arg);
-              staged.push(attachment);
-              console.log(
-                chalk.green(
-                  `✔ Attached ${attachment.name} (${formatBytes(attachment.size)}) — ${staged.length} attachment${staged.length === 1 ? "" : "s"} staged`,
-                ),
-              );
-            } catch (err) {
-              console.log(chalk.red(err instanceof Error ? err.message : String(err)));
-            }
-            continue;
-          }
-          case "attachments": {
-            if (staged.length === 0) {
-              console.log(chalk.dim("No attachments staged"));
-            } else {
-              staged.forEach((attachment, i) => {
-                console.log(
-                  `  ${i + 1}. ${attachment.name} (${formatBytes(attachment.size)}, ${attachment.assetType})`,
-                );
-              });
-            }
-            continue;
-          }
-          case "detach": {
-            if (!arg || arg === "all") {
-              const count = staged.length;
-              staged = [];
-              console.log(chalk.green(`✔ Detached ${count} attachment${count === 1 ? "" : "s"}`));
-            } else {
-              const index = Number.parseInt(arg, 10);
-              if (!Number.isInteger(index) || index < 1 || index > staged.length) {
-                console.log(chalk.yellow(`Usage: /detach [n|all] (1-${staged.length || 0})`));
-              } else {
-                const [removed] = staged.splice(index - 1, 1);
-                console.log(chalk.green(`✔ Detached ${removed?.name}`));
-              }
-            }
-            continue;
-          }
-          default:
-            continue;
-        }
-      }
-
-      let invocation: ResolvedSkillInvocation;
-      try {
-        invocation = await skillInvoker.resolve(line);
-      } catch (err) {
-        console.log(chalk.red(err instanceof ApiError ? err.detail : String(err)));
-        continue;
-      }
-      if (line.startsWith("/") && invocation.invoked.length === 0) {
-        const leading = leadingSkillToken(line);
-        if (leading && invocation.disabled.includes(leading)) {
-          console.log(
-            chalk.yellow(
-              `Skill /${leading} is disabled. Re-enable it with \`digen skill enable <id>\`.`,
-            ),
-          );
-        } else {
-          const [cmd] = line.slice(1).split(/\s+/);
-          console.log(chalk.yellow(`Unknown command or skill: /${cmd} (try /help or /skills)`));
-        }
-        continue;
-      }
-
-      activeController = new AbortController();
-      try {
-        const blocks = await buildMessageBlocks(
-          client,
-          conversationId,
-          staged,
-          line,
-          (attachment, index, total) => {
-            console.log(chalk.dim(`↑ Uploading ${attachment.name} (${index + 1}/${total})…`));
-          },
-          invocation.blocks,
-        );
-        await waitForDocumentBlocks(client, conversationId, blocks);
-        await sendMessage(
-          client,
-          conversationId,
-          workflow,
-          blocks,
-          renderer,
-          activeController.signal,
-          (id) => {
-            activeTaskId = id;
-          },
-        );
-        staged = [];
-      } catch (err) {
-        renderer.finishLine();
-        if (err instanceof ApiError) {
-          printApiError(err);
-        } else if (!(err instanceof Error && err.name === "AbortError")) {
-          console.error(chalk.red(String(err)));
-        }
-      } finally {
-        activeController = null;
-        activeTaskId = null;
-      }
+      const keepGoing = await dispatchLine(line);
+      if (!keepGoing) return;
     }
   } finally {
     process.off("SIGINT", onSigint);

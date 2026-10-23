@@ -9,6 +9,8 @@ export interface ChatTuiOptions {
   workflow: string;
   images?: "auto" | "off";
   attachments?: StagedAttachment[];
+  /** Sent as the first turn once the TUI is up; the prompt stays open afterward. */
+  message?: string;
 }
 
 /** Mount the interactive, mouse-driven chat TUI and resolve once the user quits. */
@@ -20,6 +22,7 @@ export async function runChatTui(opts: ChatTuiOptions): Promise<void> {
       workflow={opts.workflow}
       images={opts.images}
       attachments={opts.attachments}
+      message={opts.message}
     />,
     { exitOnCtrlC: false },
   );

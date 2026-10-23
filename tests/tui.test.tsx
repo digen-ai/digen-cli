@@ -1,5 +1,5 @@
 import { render } from "ink-testing-library";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { DigenClient } from "../src/lib/client.js";
 import type { TranscriptLine } from "../src/ui/transcript.js";
 import { ChatTui } from "../src/ui/tui/App.js";
@@ -19,6 +19,41 @@ describe("ChatTui", () => {
     expect(frame).toContain("conv_1");
     expect(frame).toContain("skill_agent");
     expect(frame).toContain(">");
+
+    unmount();
+  });
+
+  it("sends an opening message as the first turn and stays mounted", async () => {
+    const chatStream = vi.fn(async () => ({
+      taskId: "task_1",
+      events: (async function* () {
+        yield { type: "chunk", agent: "assistant", content: "好的" };
+        yield { type: "done" };
+      })(),
+    }));
+    const { lastFrame, unmount } = render(
+      <ChatTui
+        client={{ chatStream } as unknown as DigenClient}
+        conversationId="conv_1"
+        workflow="skill_agent"
+        images="off"
+        message="帮我做个海报"
+      />,
+    );
+
+    await vi.waitFor(() => {
+      expect(lastFrame()).toContain("帮我做个海报");
+      expect(lastFrame()).toContain("好的");
+    });
+    expect(chatStream).toHaveBeenCalledTimes(1);
+    expect(chatStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blocks: [{ type: "text", content: "帮我做个海报" }],
+        conversationId: "conv_1",
+        workflow: "skill_agent",
+      }),
+    );
+    expect(lastFrame()).toContain(">");
 
     unmount();
   });
