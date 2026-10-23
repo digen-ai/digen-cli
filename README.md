@@ -94,6 +94,7 @@ Slash commands available inside the chat:
 | `/sessions` | List your conversations |
 | `/history` | Print this conversation's history |
 | `/workflow [name]` | Show or change the workflow used for new conversations |
+| `/skills [--refresh]` | List the skills you can invoke with `/name` |
 | `/attach <path>` | Stage a local image/video/audio/document for the next message |
 | `/attachments` | List staged attachments |
 | `/detach [n\|all]` | Remove a staged attachment (default: all) |
@@ -115,6 +116,26 @@ plain URL text, which you can select and open manually.
 Pass `--no-images` or set `DIGEN_IMAGES=off` to skip resolving assets to a presigned HTTPS link
 entirely — you'll see the raw link the server sent instead; this happens automatically when output
 isn't a TTY (e.g. piped to a file).
+
+### Invoking skills
+
+Type `/<name>` anywhere in a message to explicitly invoke one of your skills (builtin or in your
+space). `<name>` is the skill's runtime name as shown by `/skills` or `digen skill list` — this is
+the SKILL.md `name`, **not** the market slug (user slugs carry a `-u{user_id}` suffix).
+
+```
+> /web_research compare the latest AI agent frameworks
+> /my-poster, then /web_research — make a launch poster from today's news
+```
+
+The CLI resolves each `/name` token and sends it as a `type: "skill"` block next to your message;
+your text is sent verbatim, including the token. Up to 3 skills are invoked per message
+(order-preserving, de-duplicated); extra or unknown tokens stay as plain text. A leading `/<name>`
+that matches neither a local command nor a skill is reported as an unknown command instead of being
+sent. Local slash commands (`/help`, `/new`, …) always take precedence over skill names.
+
+The skill list is cached briefly; run `/skills --refresh` after installing or renaming a skill in
+another terminal.
 
 ### Attaching files
 

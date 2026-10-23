@@ -4,13 +4,24 @@ import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "re
 import type { DigenClient } from "../../lib/client.js";
 import { ApiError } from "../../lib/errors.js";
 import {
+  type ResolvedSkillInvocation,
+  SkillInvoker,
+  leadingSkillToken,
+} from "../../lib/skillsInvoke.js";
+import {
   type StagedAttachment,
   buildMessageBlocks,
   formatBytes,
   stageAttachment,
   waitForDocumentBlocks,
 } from "../../lib/uploads.js";
-import { printApiError, printHelp, printHistory } from "../commandHelpers.js";
+import {
+  parseChatSlashCommand,
+  printApiError,
+  printHelp,
+  printHistory,
+  printSkillList,
+} from "../commandHelpers.js";
 import { TranscriptStore } from "../transcript.js";
 import { TranscriptLineView } from "./TranscriptLineView.js";
 import { runTurn } from "./runTurn.js";
@@ -44,6 +55,9 @@ export function ChatTui({
   const storeRef = useRef<TranscriptStore | null>(null);
   if (!storeRef.current) storeRef.current = new TranscriptStore({ client, images });
   const store = storeRef.current;
+  const invokerRef = useRef<SkillInvoker | null>(null);
+  if (!invokerRef.current) invokerRef.current = new SkillInvoker(client);
+  const skillInvoker = invokerRef.current;
   const subscribe = useMemo(() => store.subscribe.bind(store), [store]);
   const lines = useSyncExternalStore(subscribe, store.getLines);
 
@@ -117,6 +131,15 @@ export function ChatTui({
             console.log(`Current workflow: ${chalk.cyan(workflowRef.current)}`);
           }
           return undefined;
+        case "skills":
+          try {
+            printSkillList(
+              await skillInvoker.list({ refresh: arg === "refresh" || arg === "--refresh" }),
+            );
+          } catch (err) {
+            console.log(chalk.red(err instanceof ApiError ? err.detail : String(err)));
+          }
+          return undefined;
         case "cancel":
           if (activeTaskIdRef.current) {
             await client.cancelTask(activeTaskIdRef.current).catch(() => {});
@@ -184,18 +207,43 @@ export function ChatTui({
           return undefined;
         }
         default:
-          console.log(chalk.yellow(`Unknown command: /${cmd} (try /help)`));
           return undefined;
       }
     },
-    [client],
+    [client, skillInvoker],
   );
 
   const submit = useCallback(
     async (text: string) => {
-      if (text.startsWith("/")) {
+      if (parseChatSlashCommand(text)) {
         const result = await runSlashCommand(text);
         if (result === "quit") exit();
+        return;
+      }
+
+      setBusy(true);
+      let invocation: ResolvedSkillInvocation;
+      try {
+        invocation = await skillInvoker.resolve(text);
+      } catch (err) {
+        if (err instanceof ApiError) printApiError(err);
+        else console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        setBusy(false);
+        return;
+      }
+      if (text.startsWith("/") && invocation.invoked.length === 0) {
+        const leading = leadingSkillToken(text);
+        if (leading && invocation.disabled.includes(leading)) {
+          console.log(
+            chalk.yellow(
+              `Skill /${leading} is disabled. Re-enable it with \`digen skill enable <id>\`.`,
+            ),
+          );
+        } else {
+          const [cmd] = text.slice(1).split(/\s+/);
+          console.log(chalk.yellow(`Unknown command or skill: /${cmd} (try /help or /skills)`));
+        }
+        setBusy(false);
         return;
       }
 
@@ -203,7 +251,6 @@ export function ChatTui({
       const attachmentSuffix =
         attachmentsToSend.length > 0 ? `📎 ${attachmentsToSend.map((i) => i.name).join(", ")}` : "";
       store.startTurn([text, attachmentSuffix].filter(Boolean).join(" "));
-      setBusy(true);
       const controller = new AbortController();
       activeControllerRef.current = controller;
       try {
@@ -215,6 +262,7 @@ export function ChatTui({
           (attachment, index, total) => {
             console.log(chalk.dim(`↑ Uploading ${attachment.name} (${index + 1}/${total})…`));
           },
+          invocation.blocks,
         );
         await waitForDocumentBlocks(client, conversationIdRef.current, blocks);
         await runTurn(
@@ -240,7 +288,7 @@ export function ChatTui({
         setBusy(false);
       }
     },
-    [client, runSlashCommand, store, exit],
+    [client, runSlashCommand, store, exit, skillInvoker],
   );
 
   useInput((input, key) => {

@@ -204,7 +204,9 @@ export async function uploadImageFile(
 
 /**
  * Uploads all staged attachments (sequentially, reporting progress) and
- * combines them with the text into the block list a chat message should send.
+ * combines them with explicit skill invocations and the text into the block
+ * list a chat message should send. Skill blocks stay ahead of the text block
+ * so the server can match its `/name` tokens against the verbatim text.
  */
 export async function buildMessageBlocks(
   client: DigenClient,
@@ -212,6 +214,7 @@ export async function buildMessageBlocks(
   staged: StagedAttachment[],
   text: string,
   onProgress?: (staged: StagedAttachment, index: number, total: number) => void,
+  skillBlocks: ChatBlock[] = [],
 ): Promise<ChatBlock[]> {
   const blocks: ChatBlock[] = [];
   for (let i = 0; i < staged.length; i++) {
@@ -220,6 +223,7 @@ export async function buildMessageBlocks(
     onProgress?.(attachment, i, staged.length);
     blocks.push(await uploadAttachment(client, conversationId, attachment));
   }
+  blocks.push(...skillBlocks);
   const trimmed = text.trim();
   if (trimmed) {
     blocks.push({ type: "text", content: trimmed });

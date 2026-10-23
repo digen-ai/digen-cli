@@ -2,7 +2,12 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DigenClient, UploadPresignResponse, UploadedAsset } from "../src/lib/client.js";
+import type {
+  ChatBlock,
+  DigenClient,
+  UploadPresignResponse,
+  UploadedAsset,
+} from "../src/lib/client.js";
 import {
   attachmentInfoForPath,
   buildMessageBlocks,
@@ -287,5 +292,19 @@ describe("buildMessageBlocks", () => {
     const client = fakeClient();
     const blocks = await buildMessageBlocks(client, "conv_1", [], "hi");
     expect(blocks).toEqual([{ type: "text", content: "hi" }]);
+  });
+
+  it("inserts skill blocks before the text block, preserving the /name token", async () => {
+    const client = fakeClient();
+    const skill: ChatBlock = { type: "skill", skill_id: 7, name: "web_research" };
+    const blocks = await buildMessageBlocks(
+      client,
+      "conv_1",
+      [],
+      "/web_research find cats",
+      undefined,
+      [skill],
+    );
+    expect(blocks).toEqual([skill, { type: "text", content: "/web_research find cats" }]);
   });
 });

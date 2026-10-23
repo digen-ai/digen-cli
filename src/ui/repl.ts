@@ -9,6 +9,11 @@ import { createInterface } from "node:readline/promises";
 import chalk from "chalk";
 import type { ChatBlock, DigenClient } from "../lib/client.js";
 import { ApiError } from "../lib/errors.js";
+import {
+  type ResolvedSkillInvocation,
+  SkillInvoker,
+  leadingSkillToken,
+} from "../lib/skillsInvoke.js";
 import type { ChatEvent } from "../lib/sse.js";
 import {
   type StagedAttachment,
@@ -17,7 +22,13 @@ import {
   stageAttachment,
   waitForDocumentBlocks,
 } from "../lib/uploads.js";
-import { printApiError, printHelp, printHistory } from "./commandHelpers.js";
+import {
+  parseChatSlashCommand,
+  printApiError,
+  printHelp,
+  printHistory,
+  printSkillList,
+} from "./commandHelpers.js";
 import { ChatRenderer, type TurnOutcome } from "./render.js";
 
 const MAX_RESUME_ATTEMPTS = 3;
@@ -36,6 +47,7 @@ export async function runChatRepl(opts: ReplOptions): Promise<void> {
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   const renderer = new ChatRenderer({ client, images: opts.images ?? "auto" });
+  const skillInvoker = new SkillInvoker(client);
   let activeController: AbortController | null = null;
   let activeTaskId: string | null = null;
   let staged: StagedAttachment[] = [...(opts.attachments ?? [])];
@@ -74,9 +86,9 @@ export async function runChatRepl(opts: ReplOptions): Promise<void> {
       }
       if (!line && staged.length === 0) continue;
 
-      if (line.startsWith("/")) {
-        const [cmd, ...rest] = line.slice(1).split(/\s+/);
-        const arg = rest.join(" ").trim();
+      const command = parseChatSlashCommand(line);
+      if (command) {
+        const { cmd, arg } = command;
         switch (cmd) {
           case "quit":
           case "exit":
@@ -125,6 +137,16 @@ export async function runChatRepl(opts: ReplOptions): Promise<void> {
               console.log(chalk.green(`✔ Workflow for new messages set to ${workflow}`));
             } else {
               console.log(`Current workflow: ${chalk.cyan(workflow)}`);
+            }
+            continue;
+          }
+          case "skills": {
+            try {
+              printSkillList(
+                await skillInvoker.list({ refresh: arg === "refresh" || arg === "--refresh" }),
+              );
+            } catch (err) {
+              console.log(chalk.red(err instanceof ApiError ? err.detail : String(err)));
             }
             continue;
           }
@@ -192,9 +214,30 @@ export async function runChatRepl(opts: ReplOptions): Promise<void> {
             continue;
           }
           default:
-            console.log(chalk.yellow(`Unknown command: /${cmd} (try /help)`));
             continue;
         }
+      }
+
+      let invocation: ResolvedSkillInvocation;
+      try {
+        invocation = await skillInvoker.resolve(line);
+      } catch (err) {
+        console.log(chalk.red(err instanceof ApiError ? err.detail : String(err)));
+        continue;
+      }
+      if (line.startsWith("/") && invocation.invoked.length === 0) {
+        const leading = leadingSkillToken(line);
+        if (leading && invocation.disabled.includes(leading)) {
+          console.log(
+            chalk.yellow(
+              `Skill /${leading} is disabled. Re-enable it with \`digen skill enable <id>\`.`,
+            ),
+          );
+        } else {
+          const [cmd] = line.slice(1).split(/\s+/);
+          console.log(chalk.yellow(`Unknown command or skill: /${cmd} (try /help or /skills)`));
+        }
+        continue;
       }
 
       activeController = new AbortController();
@@ -207,6 +250,7 @@ export async function runChatRepl(opts: ReplOptions): Promise<void> {
           (attachment, index, total) => {
             console.log(chalk.dim(`↑ Uploading ${attachment.name} (${index + 1}/${total})…`));
           },
+          invocation.blocks,
         );
         await waitForDocumentBlocks(client, conversationId, blocks);
         await sendMessage(
