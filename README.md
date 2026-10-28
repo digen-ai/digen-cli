@@ -75,8 +75,8 @@ digen skill <command>                      Create, validate, publish, browse, in
 
 ```bash
 digen chat
-digen chat 帮我做一张发布会海报
-digen chat --attach ./brief.pdf 根据这份简报做一页总结
+digen chat make me a poster for the launch event
+digen chat --attach ./brief.pdf summarize this brief in one page
 ```
 
 Starts a new conversation using your configured default workflow (`skill_agent` unless changed via
@@ -165,7 +165,7 @@ You can also stage files before the first message, and optionally send the openi
 
 ```bash
 digen chat --attach ./cat.jpg --attach ./brief.pdf
-digen chat --attach ./cat.jpg 描述这张图
+digen chat --attach ./cat.jpg describe this image
 ```
 
 ### Uploading assets without chatting
