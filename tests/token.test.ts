@@ -32,6 +32,11 @@ describe("composeDigenToken", () => {
     expect(composeDigenToken("abc123:42:1893456000")).toBe("abc123:42:1893456000");
   });
 
+  it("forwards an extended wire token unchanged", () => {
+    const token = "abc123:42:1893456000:1793275888463121944_ebecec0f-d63a-4f84-92cf-6c226be85d12";
+    expect(composeDigenToken(token, 99, 111)).toBe(token);
+  });
+
   it("defaults userId to 0 and expiry to ~30 days out when unknown", () => {
     const now = Math.floor(Date.now() / 1000);
     const result = composeDigenToken("plain-token");

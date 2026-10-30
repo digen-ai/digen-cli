@@ -76,6 +76,35 @@ describe("DigenClient", () => {
     expect(seenHeaders?.get("digen-platform")).toBe("mcp");
   });
 
+  it("throws when the gateway returns HTTP 200 with a non-zero errCode", async () => {
+    server.use(
+      http.post(`${BASE_URL}${GATEWAY_PREFIX}/api/v1/conversations`, () =>
+        HttpResponse.json({ data: {}, errCode: 4006, errMsg: "token invalid" }, { status: 200 }),
+      ),
+    );
+    const client = makeClient();
+    await expect(client.createConversation("skill_agent")).rejects.toMatchObject({
+      detail: "token invalid",
+      errCode: 4006,
+    });
+  });
+
+  it("throws when chat returns a JSON gateway error instead of an event stream", async () => {
+    server.use(
+      http.post(`${BASE_URL}${GATEWAY_PREFIX}/api/v1/chat`, () =>
+        HttpResponse.json({ data: {}, errCode: 4006, errMsg: "token invalid" }, { status: 200 }),
+      ),
+    );
+    const client = makeClient();
+    await expect(
+      client.chatStream({
+        blocks: [{ type: "text", content: "hi" }],
+        conversationId: "conv_1",
+        workflow: "skill_agent",
+      }),
+    ).rejects.toMatchObject({ detail: "token invalid", errCode: 4006 });
+  });
+
   it("throws ApiError with structured detail on CONVERSATION_BUSY (409)", async () => {
     server.use(
       http.post(`${BASE_URL}${GATEWAY_PREFIX}/api/v1/chat`, () =>

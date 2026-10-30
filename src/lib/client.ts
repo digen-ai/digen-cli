@@ -186,7 +186,46 @@ export class DigenClient {
     if (resp.status >= 400) {
       await this.raiseForStatus(resp, text, payload);
     }
+    this.throwIfGatewayEnvelope(resp, payload);
     return payload;
+  }
+
+  /**
+   * Some gateway failures (including `token invalid`) come back as HTTP 200
+   * with `{ errCode, errMsg }` instead of an HTTP error status. Treat a
+   * non-zero `errCode` as a failure so callers don't proceed with an empty body.
+   */
+  private throwIfGatewayEnvelope(resp: Response, payload: unknown): void {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return;
+    const obj = payload as Record<string, unknown>;
+    if (!("errCode" in obj)) return;
+    const code = obj.errCode;
+    if (code === 0 || code === "0" || code === null || code === undefined) return;
+    const msg =
+      (typeof obj.errMsg === "string" && obj.errMsg) ||
+      (typeof obj.message === "string" && obj.message) ||
+      "Request failed";
+    const errCode = typeof code === "string" || typeof code === "number" ? code : String(code);
+    throw new ApiError(resp.status, msg, { errCode });
+  }
+
+  /** SSE endpoints sometimes return the JSON error envelope instead of an event stream. */
+  private async eventStreamBody(
+    resp: Response,
+    emptyDetail: string,
+  ): Promise<ReadableStream<Uint8Array>> {
+    const contentType = resp.headers.get("content-type") ?? "";
+    if (contentType.includes("json")) {
+      await this.parseJsonOrThrow(resp);
+      throw new ApiError(resp.status, "Expected an event stream");
+    }
+    if (resp.status >= 400) {
+      await this.raiseForStatus(resp);
+    }
+    if (!resp.body) {
+      throw new ApiError(resp.status, emptyDetail);
+    }
+    return resp.body;
   }
 
   private async raiseForStatus(
@@ -326,14 +365,9 @@ export class DigenClient {
       }),
       signal: opts.signal,
     });
-    if (resp.status >= 400) {
-      await this.raiseForStatus(resp);
-    }
-    if (!resp.body) {
-      throw new ApiError(resp.status, "Empty response body for chat stream");
-    }
+    const body = await this.eventStreamBody(resp, "Empty response body for chat stream");
     const taskId = resp.headers.get("x-task-id");
-    return { taskId, events: parseChatEvents(resp.body) };
+    return { taskId, events: parseChatEvents(body) };
   }
 
   async resumeStream(
@@ -345,13 +379,8 @@ export class DigenClient {
     const resp = await this.request("GET", `/api/v1/chat/resume/${taskId}?${qs.toString()}`, {
       signal,
     });
-    if (resp.status >= 400) {
-      await this.raiseForStatus(resp);
-    }
-    if (!resp.body) {
-      throw new ApiError(resp.status, "Empty response body for resume stream");
-    }
-    return parseChatEvents(resp.body);
+    const body = await this.eventStreamBody(resp, "Empty response body for resume stream");
+    return parseChatEvents(body);
   }
 
   // ==================== Assets ====================
