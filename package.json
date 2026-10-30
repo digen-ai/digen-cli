@@ -12,9 +12,7 @@
     "digen-cli": "dist/index.js",
     "digen-mcp": "dist/mcp.js"
   },
-  "files": [
-    "dist"
-  ],
+  "files": ["dist"],
   "exports": {
     ".": "./dist/index.js",
     "./mcp": "./dist/mcp.js"
@@ -64,14 +62,5 @@
     "type": "git",
     "url": "https://github.com/digen-ai/digen-cli.git"
   },
-  "keywords": [
-    "digen",
-    "cli",
-    "chat",
-    "agent",
-    "ai",
-    "upload",
-    "skills",
-    "mcp"
-  ]
+  "keywords": ["digen", "cli", "chat", "agent", "ai", "upload", "skills", "mcp"]
 }
