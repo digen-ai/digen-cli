@@ -1,5 +1,11 @@
 # digen-cli
 
+## 0.3.3
+
+### Patch Changes
+
+- b3b127b: Keep gateway tokens that already include a suffix intact, and surface HTTP 200 `errCode` responses instead of starting a chat with no conversation.
+
 ## 0.3.0
 
 ### Minor Changes

@@ -1,6 +1,6 @@
 {
   "name": "digen-cli",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Interactive command-line client for the Digen agent API and user skills",
   "type": "module",
   "license": "Apache-2.0",
